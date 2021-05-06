@@ -662,8 +662,8 @@ static int edgetpu_kci_send_cmd_return_resp(
 		return -ETIMEDOUT;
 	}
 	if (resp->status != KCI_STATUS_OK) {
-		etdev_dbg(kci->mailbox->etdev, "%s: resp status=%u", __func__,
-			  resp->status);
+		etdev_err(kci->mailbox->etdev, "KCI cmd %u response status %u",
+			  cmd->code, resp->status);
 		return -ENOMSG;
 	}
 

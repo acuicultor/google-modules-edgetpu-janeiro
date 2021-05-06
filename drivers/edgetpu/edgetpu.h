@@ -458,4 +458,22 @@ struct edgetpu_fw_version {
 #define EDGETPU_GET_TPU_TIMESTAMP \
 	_IOR(EDGETPU_IOCTL_BASE, 28, __u64)
 
+/*
+ * struct edgetpu_device_dram_usage
+ * @allocated:		size of allocated dram in bytes
+ * @available:		size of free device dram in bytes
+ */
+struct edgetpu_device_dram_usage {
+	__u64 allocated;
+	__u64 available;
+};
+
+/*
+ * Query the allocated and free device DRAM.
+ *
+ * @available and @allocated are set to 0 for chips without a device DRAM.
+ */
+#define EDGETPU_GET_DRAM_USAGE \
+	_IOR(EDGETPU_IOCTL_BASE, 29, struct edgetpu_device_dram_usage)
+
 #endif /* __EDGETPU_H__ */

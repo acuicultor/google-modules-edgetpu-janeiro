@@ -620,6 +620,19 @@ error_release:
 	return ret;
 }
 
+static int
+edgetpu_ioctl_dram_usage(struct edgetpu_dev *etdev,
+			 struct edgetpu_device_dram_usage __user *argp)
+{
+	struct edgetpu_device_dram_usage dram;
+
+	dram.allocated = edgetpu_device_dram_used(etdev);
+	dram.available = edgetpu_device_dram_available(etdev);
+	if (copy_to_user(argp, &dram, sizeof(*argp)))
+		return -EFAULT;
+	return 0;
+}
+
 long edgetpu_ioctl(struct file *file, uint cmd, ulong arg)
 {
 	struct edgetpu_client *client = file->private_data;
@@ -698,6 +711,9 @@ long edgetpu_ioctl(struct file *file, uint cmd, ulong arg)
 		break;
 	case EDGETPU_GET_TPU_TIMESTAMP:
 		ret = edgetpu_ioctl_tpu_timestamp(client, argp);
+		break;
+	case EDGETPU_GET_DRAM_USAGE:
+		ret = edgetpu_ioctl_dram_usage(client->etdev, argp);
 		break;
 	default:
 		return -ENOTTY; /* unknown command */

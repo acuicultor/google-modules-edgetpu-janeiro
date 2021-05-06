@@ -3,7 +3,7 @@
 # Makefile for EdgeTPU framework and dependent drivers.
 #
 
-obj-$(CONFIG_ABROLHOS)		+= abrolhos.o
+obj-$(CONFIG_JANEIRO)		+= janeiro.o
 
 GIT_PATH=$(srctree)
 ifeq ($(shell git --git-dir=$(GIT_PATH)/.git rev-parse --is-inside-work-tree),true)
@@ -19,14 +19,11 @@ edgetpu-objs	:= edgetpu-async.o edgetpu-dmabuf.o edgetpu-iremap-pool.o \
 		   edgetpu-sw-watchdog.o edgetpu-telemetry.o \
 		   $(edgetpu-fw-objs)
 
-abrolhos-objs	:= abrolhos-core.o abrolhos-debug-dump.o \
-		   abrolhos-device-group.o abrolhos-device.o \
-		   abrolhos-firmware.o abrolhos-fs.o abrolhos-iommu.o \
-		   abrolhos-platform.o abrolhos-pm.o abrolhos-thermal.o \
-		   abrolhos-usage-stats.o abrolhos-wakelock.o \
+janeiro-objs	:= janeiro-core.o janeiro-debug-dump.o janeiro-device-group.o \
+		   janeiro-device.o janeiro-firmware.o janeiro-fs.o \
+		   janeiro-iommu.o janeiro-platform.o janeiro-pm.o \
+		   janeiro-usage-stats.o janeiro-wakelock.o \
 		   $(edgetpu-objs)
-
-KBUILD_OPTIONS += CONFIG_ABROLHOS=m
 
 modules modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) $(@)
