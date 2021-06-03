@@ -91,11 +91,6 @@ struct edgetpu_coherent_mem {
 #endif
 };
 
-struct edgetpu_reg_window {
-	uint start_reg_offset;
-	size_t size;
-};
-
 struct edgetpu_device_group;
 struct edgetpu_p2p_csr_map;
 struct edgetpu_remote_dram_map;
@@ -128,8 +123,6 @@ struct edgetpu_client {
 	dma_addr_t *p2p_csrs_dma_addrs;
 	/* Peer DRAM dma addrs for this client, if has on-device DRAM */
 	dma_addr_t *remote_drams_dma_addrs;
-	/* range of device CSRs mmap()'able */
-	struct edgetpu_reg_window reg_window;
 	/* Per-client request to keep device active */
 	struct edgetpu_wakelock *wakelock;
 	/* Bit field of registered per die events */
@@ -170,10 +163,6 @@ struct edgetpu_dev {
 	struct cdev cdev;	   /* cdev char device structure */
 	dev_t devno;		   /* char device dev_t */
 	char dev_name[EDGETPU_DEVICE_NAME_MAX];
-	struct {
-		struct mutex lock;
-		uint count;	   /* number times device currently opened */
-	} open;
 	struct edgetpu_mapped_resource regs; /* ioremapped CSRs */
 	struct dentry *d_entry;    /* debugfs dir for this device */
 	struct mutex state_lock;   /* protects state of this device */
@@ -377,7 +366,13 @@ irqreturn_t edgetpu_chip_irq_handler(int irq, void *arg);
  *
  * Returns 0 on success, otherwise -errno.
  */
-int edgetpu_setup_mmu(struct edgetpu_dev *etdev);
+int edgetpu_chip_setup_mmu(struct edgetpu_dev *etdev);
+
+/*
+ * Reverts edgetpu_chip_setup_mmu().
+ * This is called during device removal.
+ */
+void edgetpu_chip_remove_mmu(struct edgetpu_dev *etdev);
 
 /* Read TPU timestamp */
 u64 edgetpu_chip_tpu_timestamp(struct edgetpu_dev *etdev);
@@ -398,6 +393,9 @@ struct edgetpu_client *edgetpu_client_add(struct edgetpu_dev *etdev);
 /* Remove TPU client */
 void edgetpu_client_remove(struct edgetpu_client *client);
 
+/* Handle chip-specific client removal */
+void edgetpu_chip_client_remove(struct edgetpu_client *client);
+
 /* mmap() device/queue memory */
 int edgetpu_mmap(struct edgetpu_client *client, struct vm_area_struct *vma);
 
@@ -415,5 +413,21 @@ void edgetpu_mark_probe_fail(struct edgetpu_dev *etdev);
  * etdev->state_lock.
  */
 int edgetpu_get_state_errno_locked(struct edgetpu_dev *etdev);
+
+/*
+ * "External mailboxes" below refers to mailboxes that are not handled
+ * directly by the DarwiNN runtime, such as secure or device-to-device.
+ *
+ * Chip specific code will typically keep track of state and inform the firmware
+ * that a mailbox has become active/inactive.
+ */
+
+/* Chip-specific code to acquire external mailboxes */
+int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
+				     struct edgetpu_ext_mailbox *ext_mbox);
+
+/* Chip-specific code to release external mailboxes */
+int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
+				     struct edgetpu_ext_mailbox *ext_mbox);
 
 #endif /* __EDGETPU_INTERNAL_H__ */

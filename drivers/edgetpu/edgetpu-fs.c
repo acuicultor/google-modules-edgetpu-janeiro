@@ -79,14 +79,9 @@ int edgetpu_open(struct edgetpu_dev *etdev, struct file *file)
 
 	/* Set client pointer to NULL if error creating client. */
 	file->private_data = NULL;
-	mutex_lock(&etdev->open.lock);
 	client = edgetpu_client_add(etdev);
-	if (IS_ERR(client)) {
-		mutex_unlock(&etdev->open.lock);
+	if (IS_ERR(client))
 		return PTR_ERR(client);
-	}
-	etdev->open.count++;
-	mutex_unlock(&etdev->open.lock);
 	file->private_data = client;
 	return 0;
 }
@@ -110,28 +105,27 @@ static int edgetpu_fs_release(struct inode *inode, struct file *file)
 	etdev = client->etdev;
 
 	wakelock_count = edgetpu_wakelock_lock(client->wakelock);
-
+	mutex_lock(&client->group_lock);
 	/*
-	 * TODO(b/180528495): remove pm_get when disbanding can be performed
-	 * with device off.
+	 * @wakelock = 0 means the device might be powered off. And for group with a non-detachable
+	 * mailbox, its mailbox is removed when the group is released, in such case we need to
+	 * ensure the device is powered to prevent kernel panic on programming VII mailbox CSRs.
+	 *
+	 * For mailbox-detachable groups the mailbox had been removed when the wakelock was
+	 * released, edgetpu_device_group_release() doesn't need the device be powered in this case.
 	 */
-	if (client->group && !wakelock_count) {
+	if (!wakelock_count && client->group && !client->group->mailbox_detachable) {
 		wakelock_count = 1;
 		edgetpu_pm_get(etdev->pm);
 	}
-
+	mutex_unlock(&client->group_lock);
 	edgetpu_wakelock_unlock(client->wakelock);
 
 	edgetpu_client_remove(client);
 
-	mutex_lock(&etdev->open.lock);
-	if (etdev->open.count)
-		--etdev->open.count;
-
 	/* count was zero if client previously released its wake lock */
 	if (wakelock_count)
 		edgetpu_pm_put(etdev->pm);
-	mutex_unlock(&etdev->open.lock);
 	return 0;
 }
 
@@ -227,10 +221,7 @@ static int edgetpu_ioctl_finalize_group(struct edgetpu_client *client)
 	group = client->group;
 	if (!group || !edgetpu_device_group_is_leader(group, client))
 		goto out_unlock;
-	/*
-	 * TODO(b/180528495): remove pm_get when finalization can be performed
-	 * with device off.
-	 */
+	/* Finalization has to be performed with device on. */
 	if (!wakelock_count) {
 		ret = edgetpu_pm_get(client->etdev->pm);
 		if (ret) {
@@ -633,6 +624,30 @@ edgetpu_ioctl_dram_usage(struct edgetpu_dev *etdev,
 	return 0;
 }
 
+static int
+edgetpu_ioctl_acquire_ext_mailbox(struct edgetpu_client *client,
+				  struct edgetpu_ext_mailbox __user *argp)
+{
+	struct edgetpu_ext_mailbox ext_mailbox;
+
+	if (copy_from_user(&ext_mailbox, argp, sizeof(ext_mailbox)))
+		return -EFAULT;
+
+	return edgetpu_chip_acquire_ext_mailbox(client, &ext_mailbox);
+}
+
+static int
+edgetpu_ioctl_release_ext_mailbox(struct edgetpu_client *client,
+				  struct edgetpu_ext_mailbox __user *argp)
+{
+	struct edgetpu_ext_mailbox ext_mailbox;
+
+	if (copy_from_user(&ext_mailbox, argp, sizeof(ext_mailbox)))
+		return -EFAULT;
+
+	return edgetpu_chip_release_ext_mailbox(client, &ext_mailbox);
+}
+
 long edgetpu_ioctl(struct file *file, uint cmd, ulong arg)
 {
 	struct edgetpu_client *client = file->private_data;
@@ -715,6 +730,13 @@ long edgetpu_ioctl(struct file *file, uint cmd, ulong arg)
 	case EDGETPU_GET_DRAM_USAGE:
 		ret = edgetpu_ioctl_dram_usage(client->etdev, argp);
 		break;
+	case EDGETPU_ACQUIRE_EXT_MAILBOX:
+		ret = edgetpu_ioctl_acquire_ext_mailbox(client, argp);
+		break;
+	case EDGETPU_RELEASE_EXT_MAILBOX:
+		ret = edgetpu_ioctl_release_ext_mailbox(client, argp);
+		break;
+
 	default:
 		return -ENOTTY; /* unknown command */
 	}
@@ -1014,11 +1036,18 @@ static const struct file_operations syncfences_ops = {
 	.release = single_release,
 };
 
-static void edgetpu_debugfs_global_setup(void)
+static int edgetpu_debugfs_global_setup(void)
 {
 	edgetpu_debugfs_dir = debugfs_create_dir("edgetpu", NULL);
+	if (IS_ERR(edgetpu_debugfs_dir)) {
+		pr_err(DRIVER_NAME " error creating edgetpu debugfs dir: %ld\n",
+		       PTR_ERR(edgetpu_debugfs_dir));
+		return PTR_ERR(edgetpu_debugfs_dir);
+	}
+
 	debugfs_create_file("syncfences", 0440, edgetpu_debugfs_dir, NULL,
 			    &syncfences_ops);
+	return 0;
 }
 
 int __init edgetpu_fs_init(void)

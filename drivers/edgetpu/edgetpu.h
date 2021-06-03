@@ -41,12 +41,18 @@ typedef __u32 edgetpu_map_flag_t;
 #define EDGETPU_MAP_ATTR_PBHA_SHIFT	5
 #define EDGETPU_MAP_ATTR_PBHA_MASK	0xf
 
+/* External mailbox types */
+#define EDGETPU_EXT_MAILBOX_TYPE_TZ		1
+#define EDGETPU_EXT_MAILBOX_TYPE_GSA		2
+#define EDGETPU_EXT_MAILBOX_TYPE_DSP		3
+
 struct edgetpu_map_ioctl {
-	__u64 host_address;
+	__u64 host_address;	/* user-space address to be mapped */
 	__u64 size;		/* size of mapping in bytes */
 	__u64 device_address;	/* returned TPU VA */
 	/*
-	 * Flags indicating mapping attribute requests from the runtime.
+	 * Flags or'ed with EDGETPU_MAP_*, indicating mapping attribute requests from
+	 * the runtime.
 	 * Set RESERVED bits to 0 to ensure backwards compatibility.
 	 *
 	 * Bitfields:
@@ -78,17 +84,31 @@ struct edgetpu_map_ioctl {
 	/*
 	 * Index of die in a device group. The index is decided by the order of
 	 * joining the group, with value from zero to (# dies in group) - 1.
-	 * Index 0 for the master die in the group.
+	 * Index 0 for the leader die in the group.
 	 *
 	 * This field is ignored unless EDGETPU_MAP_NONMIRRORED is passed to
-	 * flags.
+	 * @flags.
 	 */
 	__u32 die_index;
 };
 
 #define EDGETPU_IOCTL_BASE 0xED
 
-/* Map host buffer to TPU. */
+/*
+ * Map a host buffer to TPU.
+ *
+ * This operation can be performed without acquiring the wakelock. This
+ * characteristic holds for all mapping / un-mapping ioctls.
+ *
+ * On success, @device_address is set, and TPU can access the content of
+ * @host_address by @device_address afterwards.
+ *
+ * EINVAL: If the group is not finalized.
+ * EINVAL: If size equals 0.
+ * EINVAL: (for EDGETPU_MAP_NONMIRRORED case) If @die_index exceeds the number
+ *         of clients in the group.
+ * EINVAL: If the target device group is disbanded.
+ */
 #define EDGETPU_MAP_BUFFER \
 	_IOWR(EDGETPU_IOCTL_BASE, 0, struct edgetpu_map_ioctl)
 
@@ -102,6 +122,8 @@ struct edgetpu_map_ioctl {
  *
  * Note: Only the SKIP_CPU_SYNC flag is considered, other bits in @flags are
  * fetched from the kernel's record.
+ *
+ * EINVAL: If the requested @device_address is not found.
  */
 #define EDGETPU_UNMAP_BUFFER \
 	_IOW(EDGETPU_IOCTL_BASE, 4, struct edgetpu_map_ioctl)
@@ -118,7 +140,12 @@ struct edgetpu_event_register {
 	__u32 eventfd;
 };
 
-/* Set eventfd for notification of events from kernel to the device group. */
+/*
+ * Set eventfd for notification of events from kernel to the device group.
+ *
+ * EINVAL: If @event_id is not one of EDGETPU_EVENT_*.
+ * EBADF, EINVAL: If @eventfd is not a valid event file descriptor.
+ */
 #define EDGETPU_SET_EVENTFD \
 	_IOW(EDGETPU_IOCTL_BASE, 5, struct edgetpu_event_register)
 
@@ -145,19 +172,29 @@ struct edgetpu_mailbox_attr {
  * Create a new device group with the caller as the master.
  *
  * EINVAL: If the caller already belongs to a group.
- * EINVAL: If @cmd/resp_queue_size equals 0.
- * EINVAL: If @sizeof_cmd/resp equals 0.
+ * EINVAL: If @cmd_queue_size or @resp_queue_size equals 0.
+ * EINVAL: If @sizeof_cmd or @sizeof_resp equals 0.
  * EINVAL: If @cmd_queue_size * 1024 / @sizeof_cmd >= 1024, this is a hardware
  *         limitation. Same rule for the response sizes pair.
  */
 #define EDGETPU_CREATE_GROUP \
 	_IOW(EDGETPU_IOCTL_BASE, 6, struct edgetpu_mailbox_attr)
 
-/* Join the calling fd to the device group of the supplied fd. */
+/*
+ * Join the calling fd to the device group of the supplied fd.
+ *
+ * EINVAL: If the caller already belongs to a group.
+ * EINVAL: If the supplied FD is not for an open EdgeTPU device file.
+ */
 #define EDGETPU_JOIN_GROUP \
 	_IOW(EDGETPU_IOCTL_BASE, 7, __u32)
 
-/* Finalize the device group with the caller as the master. */
+/*
+ * Finalize the device group with the caller as the leader.
+ *
+ * EINVAL: If the dies in this group are not allowed to form a device group.
+ * ETIMEDOUT: If the handshake with TPU firmware times out.
+ */
 #define EDGETPU_FINALIZE_GROUP \
 	_IO(EDGETPU_IOCTL_BASE, 8)
 
@@ -168,7 +205,12 @@ struct edgetpu_mailbox_attr {
 #define EDGETPU_PERDIE_EVENT_LOGS_AVAILABLE		0x1000
 #define EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE		0x1001
 
-/* Set eventfd for notification of per-die events from kernel. */
+/*
+ * Set eventfd for notification of per-die events from kernel.
+ *
+ * EINVAL: If @event_id is not one of EDGETPU_PERDIE_EVENT_*.
+ * EBADF, EINVAL: If @eventfd is not a valid eventfd.
+ */
 #define EDGETPU_SET_PERDIE_EVENTFD \
 	_IOW(EDGETPU_IOCTL_BASE, 9, struct edgetpu_event_register)
 
@@ -189,11 +231,11 @@ struct edgetpu_sync_ioctl {
 	 * device address returned by EDGETPU_MAP_BUFFER.
 	 */
 	__u64 device_address;
-	/* size in bytes to be sync'ed */
+	/* Size in bytes to be sync'ed. */
 	__u64 size;
 	/*
-	 * offset in bytes at which the sync operation is to begin from the
-	 * start of the buffer
+	 * Offset in bytes at which the sync operation is to begin from the
+	 * start of the buffer.
 	 */
 	__u64 offset;
 	/*
@@ -231,13 +273,9 @@ struct edgetpu_sync_ioctl {
 	_IOW(EDGETPU_IOCTL_BASE, 16, struct edgetpu_sync_ioctl)
 
 struct edgetpu_map_dmabuf_ioctl {
-	/*
-	 * Offset within the dma-buf to be mapped in bytes.
-	 *
-	 * Must be page-aligned.
-	 */
+	/* Deprecated; pass 0 to keep compatibility. */
 	__u64 offset;
-	/* Size to be mapped in bytes. */
+	/* Ignored; the entire dma-buf is mapped. */
 	__u64 size;
 	/*
 	 * Returned TPU VA.
@@ -268,8 +306,8 @@ struct edgetpu_map_dmabuf_ioctl {
  * On success, @device_address is set and the syscall returns zero.
  *
  * EINVAL: If @offset is not page-aligned.
- * EINVAL: If @size is zero.
- * EINVAL: If @die_index exceeds the number of clients in the group.
+ * EINVAL: (for EDGETPU_MAP_NONMIRRORED case) If @die_index exceeds the number
+ *         of clients in the group.
  * EINVAL: If the target device group is disbanded.
  */
 #define EDGETPU_MAP_DMABUF \
@@ -278,9 +316,8 @@ struct edgetpu_map_dmabuf_ioctl {
  * Un-map address previously mapped by EDGETPU_MAP_DMABUF.
  *
  * Only fields @die_index and @device_address in the third argument will be
- * used, other fields such as @size and @offset will be fetched from the
- * kernel's internal records. If the buffer was requested as
- * EDGETPU_MAP_MIRRORED, @die_index is ignored as well.
+ * used, other fields will be fetched from the kernel's internal records. If the
+ * buffer was requested as EDGETPU_MAP_MIRRORED, @die_index is ignored as well.
  *
  * EINVAL: If @device_address is not found.
  * EINVAL: If the target device group is disbanded.
@@ -418,8 +455,13 @@ struct edgetpu_sync_fence_status {
  * Release the current client's wakelock, allowing firmware to be shut down if
  * no other clients are active.
  * Groups and buffer mappings are preserved.
- * WARNING: Attempts to access any mapped CSRs before re-acquiring the wakelock
- * may crash the system.
+ *
+ * Some mmap operations (listed below) are not allowed when the client's
+ * wakelock is released. And if the runtime is holding the mmap'ed buffers, this
+ * ioctl returns EAGAIN and the wakelock is not released.
+ *   - EDGETPU_MMAP_CSR_OFFSET
+ *   - EDGETPU_MMAP_CMD_QUEUE_OFFSET
+ *   - EDGETPU_MMAP_RESP_QUEUE_OFFSET
  */
 #define EDGETPU_RELEASE_WAKE_LOCK	_IO(EDGETPU_IOCTL_BASE, 25)
 
@@ -441,9 +483,7 @@ struct edgetpu_fw_version {
  * When there is an attempt to load firmware, its version numbers are recorded
  * by the kernel and will be returned on the following EDGETPU_FIRMWARE_VERSION
  * calls. If the latest firmware attempted to load didn't exist or had an
- * invalid header, this call returns -ENODEV.
- *
- * Returns 0 on success, -errno on error.
+ * invalid header, this call returns ENODEV.
  */
 #define EDGETPU_FIRMWARE_VERSION \
 	_IOR(EDGETPU_IOCTL_BASE, 27, struct edgetpu_fw_version)
@@ -475,5 +515,34 @@ struct edgetpu_device_dram_usage {
  */
 #define EDGETPU_GET_DRAM_USAGE \
 	_IOR(EDGETPU_IOCTL_BASE, 29, struct edgetpu_device_dram_usage)
+
+/*
+ * struct edgetpu_ext_mailbox
+ * @client_id:		Client identifier (may not be needed depending on type)
+ * @attrs:		Array of mailbox attributes (pointer to
+ *			edgetpu_mailbox_attr, may be NULL depending on type)
+ * @type:		One of the EDGETPU_EXT_MAILBOX_xxx values
+ * @count:		Number of mailboxes to acquire
+ */
+struct edgetpu_ext_mailbox {
+	__u64 client_id;
+	__u64 attrs;
+	__u32 type;
+	__u32 count;
+};
+
+/*
+ * Acquire a chip-specific mailbox that is not directly managed by the TPU
+ * runtime. This can be a secure mailbox or a device-to-device mailbox.
+ */
+#define EDGETPU_ACQUIRE_EXT_MAILBOX \
+	_IOW(EDGETPU_IOCTL_BASE, 30, struct edgetpu_ext_mailbox)
+
+/*
+ * Release a chip-specific mailbox that is not directly managed by the TPU
+ * runtime. This can be a secure mailbox or a device-to-device mailbox.
+ */
+#define EDGETPU_RELEASE_EXT_MAILBOX \
+	_IOW(EDGETPU_IOCTL_BASE, 31, struct edgetpu_ext_mailbox)
 
 #endif /* __EDGETPU_H__ */

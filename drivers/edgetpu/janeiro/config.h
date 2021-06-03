@@ -16,8 +16,6 @@
 
 #define EDGETPU_HAS_WAKELOCK
 
-#define EDGETPU_IS_IO_COHERENT
-
 /*
  * The TPU VA where the firmware is located.
  *

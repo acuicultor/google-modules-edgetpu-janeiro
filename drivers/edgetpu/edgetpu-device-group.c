@@ -60,6 +60,24 @@ struct edgetpu_host_map {
 	struct sg_table *sg_tables;
 };
 
+/*
+ * A helper structure for the return value of find_sg_to_sync().
+ */
+struct sglist_to_sync {
+	struct scatterlist *sg;
+	int nelems;
+	/*
+	 * The SG that has its length modified by find_sg_to_sync().
+	 * Can be NULL, which means no SG's length was modified.
+	 */
+	struct scatterlist *last_sg;
+	/*
+	 * find_sg_to_sync() will temporarily change the length of @last_sg.
+	 * This is used to restore the length.
+	 */
+	unsigned int orig_length;
+};
+
 #ifdef EDGETPU_HAS_MCP
 
 /* parameter to be used in async KCI jobs */
@@ -86,7 +104,7 @@ static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
 	struct edgetpu_dev *etdev = edgetpu_device_group_nth_etdev(group, i);
 
 	etdev_dbg(etdev, "%s: leave group %u", __func__, group->workload_id);
-	edgetpu_kci_update_usage(etdev);
+	edgetpu_kci_update_usage_async(etdev);
 	edgetpu_kci_leave_group(etdev->kci);
 	return 0;
 }
@@ -101,16 +119,11 @@ static int edgetpu_group_kci_open_device(struct edgetpu_device_group *group)
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return 0;
 	mailbox_id = edgetpu_group_context_id_locked(group);
-	ret = edgetpu_kci_open_device(group->etdev->kci, BIT(mailbox_id));
-	/*
-	 * This should only happen when the FW hasn't driven this KCI, log once
-	 * to prevent log storm.
-	 */
+	ret = edgetpu_mailbox_activate(group->etdev, BIT(mailbox_id));
 	if (ret)
-		etdev_warn_once(group->etdev, "Open device failed with %d",
-				ret);
+		etdev_err(group->etdev, "activate mailbox failed with %d", ret);
 	atomic_inc(&group->etdev->job_count);
-	return 0;
+	return ret;
 }
 
 static void edgetpu_group_kci_close_device(struct edgetpu_device_group *group)
@@ -121,15 +134,10 @@ static void edgetpu_group_kci_close_device(struct edgetpu_device_group *group)
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return;
 	mailbox_id = edgetpu_group_context_id_locked(group);
-	ret = edgetpu_kci_close_device(group->etdev->kci, BIT(mailbox_id));
-
-	/*
-	 * This should only happen when the FW hasn't driven this KCI, log once
-	 * to prevent log storm.
-	 */
+	ret = edgetpu_mailbox_deactivate(group->etdev, BIT(mailbox_id));
 	if (ret)
-		etdev_warn_once(group->etdev, "Close device failed with %d",
-				ret);
+		etdev_err(group->etdev, "deactivate mailbox failed with %d",
+			  ret);
 	return;
 }
 
@@ -147,7 +155,7 @@ static void edgetpu_group_kci_close_device(struct edgetpu_device_group *group)
 static void edgetpu_device_group_kci_leave(struct edgetpu_device_group *group)
 {
 #ifdef EDGETPU_HAS_MULTI_GROUPS
-	edgetpu_kci_update_usage(group->etdev);
+	edgetpu_kci_update_usage_async(group->etdev);
 	return edgetpu_group_kci_close_device(group);
 #else /* !EDGETPU_HAS_MULTI_GROUPS */
 	struct kci_worker_param *params =
@@ -347,6 +355,12 @@ static void do_detach_mailbox_locked(struct edgetpu_device_group *group)
 		group->context_id = EDGETPU_CONTEXT_INVALID;
 }
 
+static inline bool is_finalized_or_errored(struct edgetpu_device_group *group)
+{
+	return edgetpu_device_group_is_finalized(group) ||
+	       edgetpu_device_group_is_errored(group);
+}
+
 int edgetpu_group_set_eventfd(struct edgetpu_device_group *group, uint event_id,
 			      int eventfd)
 {
@@ -423,7 +437,7 @@ static void edgetpu_device_group_release(struct edgetpu_device_group *group)
 	struct edgetpu_dev *etdev;
 
 	edgetpu_group_clear_events(group);
-	if (edgetpu_device_group_is_finalized(group)) {
+	if (is_finalized_or_errored(group)) {
 		for (i = 0; i < group->n_clients; i++) {
 			etdev = edgetpu_device_group_nth_etdev(group, i);
 			edgetpu_sw_wdt_dec_active_ref(etdev);
@@ -550,8 +564,7 @@ static bool edgetpu_in_any_group_locked(struct edgetpu_dev *etdev)
 	return etdev->n_groups;
 }
 
-/* caller must hold the client's etdev state_lock. */
-void edgetpu_device_group_leave_locked(struct edgetpu_client *client)
+void edgetpu_device_group_leave(struct edgetpu_client *client)
 {
 	struct edgetpu_device_group *group;
 	struct edgetpu_list_group *l;
@@ -573,7 +586,7 @@ void edgetpu_device_group_leave_locked(struct edgetpu_client *client)
 	if (edgetpu_device_group_is_waiting(group)) {
 		if (edgetpu_device_group_leader(group) == client)
 			will_disband = true;
-	} else if (edgetpu_device_group_is_finalized(group)) {
+	} else if (is_finalized_or_errored(group)) {
 		will_disband = true;
 	}
 
@@ -606,18 +619,6 @@ void edgetpu_device_group_leave_locked(struct edgetpu_client *client)
 		}
 	}
 	mutex_unlock(&client->etdev->groups_lock);
-}
-
-void edgetpu_device_group_leave(struct edgetpu_client *client)
-{
-	mutex_lock(&client->etdev->state_lock);
-	/*
-	 * The only chance that the state is not GOOD here is the wdt timeout
-	 * action is working. Let that worker perform the group leaving.
-	 */
-	if (client->etdev->state == ETDEV_STATE_GOOD)
-		edgetpu_device_group_leave_locked(client);
-	mutex_unlock(&client->etdev->state_lock);
 }
 
 struct edgetpu_device_group *
@@ -684,7 +685,7 @@ edgetpu_device_group_alloc(struct edgetpu_client *client,
 	return group;
 
 error_leave_group:
-	edgetpu_device_group_leave_locked(client);
+	edgetpu_device_group_leave(client);
 error_put_group:
 	edgetpu_device_group_put(group);
 error:
@@ -762,7 +763,7 @@ int edgetpu_device_group_finalize(struct edgetpu_device_group *group)
 
 	mutex_lock(&group->lock);
 	/* do nothing if the group is finalized */
-	if (edgetpu_device_group_is_finalized(group))
+	if (is_finalized_or_errored(group))
 		goto err_unlock;
 
 	if (!edgetpu_device_group_is_waiting(group)) {
@@ -823,6 +824,7 @@ int edgetpu_device_group_finalize(struct edgetpu_device_group *group)
 
 	edgetpu_usr_init_group(group);
 
+	/* send KCI only if the device is powered on */
 	if (edgetpu_wakelock_count_locked(leader->wakelock)) {
 		ret = edgetpu_device_group_kci_finalized(group);
 		if (ret)
@@ -1085,9 +1087,9 @@ static void edgetpu_host_map_show(struct edgetpu_mapping *map,
  */
 static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 					    struct edgetpu_map_ioctl *arg,
-					    uint *pnum_pages)
+					    uint *pnum_pages, bool *preadonly)
 {
-	u64 host_addr = arg->host_address;
+	u64 host_addr = untagged_addr(arg->host_address);
 	u64 size = arg->size;
 	const enum dma_data_direction dir = arg->flags & EDGETPU_MAP_DIR_MASK;
 	uint num_pages;
@@ -1096,12 +1098,14 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	struct page **pages;
 	int i;
 	int ret;
+	struct vm_area_struct *vma;
+	unsigned int foll_flags = FOLL_LONGTERM | FOLL_WRITE;
 
 	if (size == 0)
 		return ERR_PTR(-EINVAL);
 	offset = host_addr & (PAGE_SIZE - 1);
 	/* overflow check */
-	if (unlikely(size + offset < size))
+	if (unlikely((size + offset) / PAGE_SIZE >= UINT_MAX - 1 || size + offset < size))
 		return ERR_PTR(-ENOMEM);
 	num_pages = (size + offset) / PAGE_SIZE;
 	if ((size + offset) % PAGE_SIZE)
@@ -1118,10 +1122,20 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 		return ERR_PTR(-ENOMEM);
 
 	/*
-	 * DMA Buffers appear to be always dirty, so mark pages as always writeable
+	 * The host pages might be read-only and could fail if we attempt to pin
+	 * it with FOLL_WRITE.
+	 * default to read/write if find_extend_vma returns NULL
 	 */
-	ret = pin_user_pages_fast(host_addr & PAGE_MASK, num_pages,
-				  FOLL_WRITE | FOLL_LONGTERM, pages);
+	vma = find_extend_vma(current->mm, host_addr & PAGE_MASK);
+	if (vma && !(vma->vm_flags & VM_WRITE)) {
+		foll_flags &= ~FOLL_WRITE;
+		*preadonly = true;
+	} else {
+		*preadonly = false;
+	}
+
+	ret = pin_user_pages_fast(host_addr & PAGE_MASK, num_pages, foll_flags,
+				  pages);
 	if (ret < 0) {
 		etdev_dbg(etdev, "get user pages failed %u:%pK-%u: %d",
 			  group->workload_id, (void *)host_addr, num_pages,
@@ -1232,32 +1246,60 @@ error:
 }
 
 /*
- * Find the scatterlist covering range [start, end).
+ * Finds the scatterlist covering range [start, end).
  *
- * Returns NULL if:
- * - @start is larger than the whole SG table
+ * The found SG and number of elements will be stored in @sglist.
+ *
+ * To ensure the returned SG list strictly locates in range [start, end), the
+ * last SG's length is shrunk. Therefore caller must call
+ * restore_sg_after_sync(@sglist) after the DMA sync is performed.
+ *
+ * @sglist->nelems == 0 means the target range exceeds the whole SG table.
  */
-static struct scatterlist *find_sg_within(const struct sg_table *sgt, u64 start,
-					  u64 end, int *nelems)
+static void find_sg_to_sync(const struct sg_table *sgt, u64 start, u64 end,
+			    struct sglist_to_sync *sglist)
 {
-	struct scatterlist *sg, *sg_to_sync = NULL;
+	struct scatterlist *sg;
 	size_t cur_offset = 0;
 	int i;
 
-	*nelems = 0;
+	sglist->sg = NULL;
+	sglist->nelems = 0;
+	sglist->last_sg = NULL;
+	if (unlikely(end == 0))
+		return;
 	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
-		if (end <= cur_offset)
-			break;
 		if (cur_offset <= start && start < cur_offset + sg->length)
-			sg_to_sync = sg;
-		if (sg_to_sync)
-			(*nelems)++;
+			sglist->sg = sg;
+		if (sglist->sg)
+			++sglist->nelems;
 		cur_offset += sg->length;
+		if (end <= cur_offset) {
+			sglist->last_sg = sg;
+			sglist->orig_length = sg->length;
+			/*
+			 * To let the returned SG list have exact length as
+			 * [start, end).
+			 */
+			sg->length -= cur_offset - end;
+			break;
+		}
 	}
-
-	return sg_to_sync;
 }
 
+static void restore_sg_after_sync(struct sglist_to_sync *sglist)
+{
+	if (!sglist->last_sg)
+		return;
+	sglist->last_sg->length = sglist->orig_length;
+}
+
+/*
+ * Performs DMA sync of the mapping with region [offset, offset + size).
+ *
+ * Caller holds mapping's lock, to prevent @hmap being modified / removed by
+ * other processes.
+ */
 static int group_sync_host_map(struct edgetpu_device_group *group,
 			       struct edgetpu_host_map *hmap, u64 offset,
 			       u64 size, enum dma_data_direction dir,
@@ -1268,29 +1310,32 @@ static int group_sync_host_map(struct edgetpu_device_group *group,
 		for_cpu ? dma_sync_sg_for_cpu : dma_sync_sg_for_device;
 	struct edgetpu_dev *etdev;
 	struct sg_table *sgt;
-	struct scatterlist *sg;
+	struct sglist_to_sync sglist;
 	int i;
-	int nelems;
 
 	sgt = &hmap->map.sgt;
-	sg = find_sg_within(sgt, offset, end, &nelems);
-	if (!sg)
+	find_sg_to_sync(sgt, offset, end, &sglist);
+	if (!sglist.nelems)
 		return -EINVAL;
 
-	if (IS_MIRRORED(hmap->map.flags)) {
-		sync(group->etdev->dev, sg, nelems, dir);
-		for (i = 1; i < group->n_clients; i++) {
-			etdev = edgetpu_device_group_nth_etdev(group, i);
-			sg = find_sg_within(&hmap->sg_tables[i], offset, end,
-					    &nelems);
-			if (WARN_ON(!sg))
-				return -EINVAL;
-			sync(etdev->dev, sg, nelems, dir);
-		}
-	} else {
+	if (IS_MIRRORED(hmap->map.flags))
+		etdev = group->etdev;
+	else
 		etdev = edgetpu_device_group_nth_etdev(group,
 						       hmap->map.die_index);
-		sync(etdev->dev, sg, nelems, dir);
+	sync(etdev->dev, sglist.sg, sglist.nelems, dir);
+	restore_sg_after_sync(&sglist);
+
+	if (IS_MIRRORED(hmap->map.flags)) {
+		for (i = 1; i < group->n_clients; i++) {
+			etdev = edgetpu_device_group_nth_etdev(group, i);
+			find_sg_to_sync(&hmap->sg_tables[i], offset, end,
+					&sglist);
+			if (WARN_ON(!sglist.sg))
+				return -EINVAL;
+			sync(etdev->dev, sglist.sg, sglist.nelems, dir);
+			restore_sg_after_sync(&sglist);
+		}
 	}
 
 	return 0;
@@ -1310,18 +1355,24 @@ int edgetpu_device_group_map(struct edgetpu_device_group *group,
 	enum edgetpu_context_id context_id;
 	const u32 mmu_flags = map_to_mmu_flags(flags) | EDGETPU_MMU_HOST;
 	int i;
+	bool readonly;
 
 	if (!valid_dma_direction(flags & EDGETPU_MAP_DIR_MASK))
 		return -EINVAL;
 	/* Pin user pages before holding any lock. */
-	pages = edgetpu_pin_user_pages(group, arg, &num_pages);
+	pages = edgetpu_pin_user_pages(group, arg, &num_pages, &readonly);
 	if (IS_ERR(pages))
 		return PTR_ERR(pages);
+	/* If the host pages are read-only, fallback to use DMA_TO_DEVICE. */
+	if (readonly) {
+		flags &= ~EDGETPU_MAP_DIR_MASK;
+		flags |= EDGETPU_MAP_DMA_TO_DEVICE;
+	}
 
 	mutex_lock(&group->lock);
 	context_id = edgetpu_group_context_id_locked(group);
 	if (!edgetpu_device_group_is_finalized(group)) {
-		ret = -EINVAL;
+		ret = edgetpu_group_errno(group);
 		goto error;
 	}
 	if (!IS_MIRRORED(flags)) {
@@ -1397,7 +1448,7 @@ int edgetpu_device_group_unmap(struct edgetpu_device_group *group,
 
 	mutex_lock(&group->lock);
 	if (!edgetpu_device_group_is_finalized(group)) {
-		ret = -EINVAL;
+		ret = edgetpu_group_errno(group);
 		goto unlock_group;
 	}
 
@@ -1442,7 +1493,7 @@ int edgetpu_device_group_sync_buffer(struct edgetpu_device_group *group,
 
 	mutex_lock(&group->lock);
 	if (!edgetpu_device_group_is_finalized(group)) {
-		ret = -EINVAL;
+		ret = edgetpu_group_errno(group);
 		goto unlock_group;
 	}
 
@@ -1480,6 +1531,9 @@ void edgetpu_group_mappings_show(struct edgetpu_device_group *group,
 	switch (group->status) {
 	case EDGETPU_DEVICE_GROUP_WAITING:
 	case EDGETPU_DEVICE_GROUP_FINALIZED:
+		break;
+	case EDGETPU_DEVICE_GROUP_ERRORED:
+		seq_puts(s, " (errored)");
 		break;
 	case EDGETPU_DEVICE_GROUP_DISBANDED:
 		seq_puts(s, ": disbanded\n");
@@ -1526,7 +1580,7 @@ int edgetpu_mmap_csr(struct edgetpu_device_group *group,
 
 	mutex_lock(&group->lock);
 	if (!edgetpu_group_finalized_and_attached(group)) {
-		ret = -EINVAL;
+		ret = edgetpu_group_errno(group);
 		goto out;
 	}
 
@@ -1553,7 +1607,7 @@ int edgetpu_mmap_queue(struct edgetpu_device_group *group,
 
 	mutex_lock(&group->lock);
 	if (!edgetpu_group_finalized_and_attached(group)) {
-		ret = -EINVAL;
+		ret = edgetpu_group_errno(group);
 		goto out;
 	}
 
@@ -1601,8 +1655,12 @@ void edgetpu_group_detach_mailbox_locked(struct edgetpu_device_group *group)
 void edgetpu_group_close_and_detach_mailbox(struct edgetpu_device_group *group)
 {
 	mutex_lock(&group->lock);
-	/* only a finalized group may have mailbox attached */
-	if (edgetpu_device_group_is_finalized(group)) {
+	/*
+	 * Only a finalized group may have mailbox attached.
+	 *
+	 * Detaching mailbox for an errored group is also fine.
+	 */
+	if (is_finalized_or_errored(group)) {
 		edgetpu_group_kci_close_device(group);
 		edgetpu_group_detach_mailbox_locked(group);
 	}
@@ -1623,7 +1681,10 @@ int edgetpu_group_attach_and_open_mailbox(struct edgetpu_device_group *group)
 	int ret = 0;
 
 	mutex_lock(&group->lock);
-	/* only attaching mailbox for finalized groups */
+	/*
+	 * Only attaching mailbox for finalized groups.
+	 * Don't attach mailbox for errored groups.
+	 */
 	if (edgetpu_device_group_is_finalized(group)) {
 		ret = edgetpu_group_attach_mailbox_locked(group);
 		if (!ret)

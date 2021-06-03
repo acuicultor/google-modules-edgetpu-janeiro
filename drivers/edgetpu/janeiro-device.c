@@ -89,3 +89,22 @@ void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
 	etdev_warn(etdev, "%s: Unrecognized KCI request: %u\n", __func__,
 		   resp->code);
 }
+
+
+/* TODO: This would be a good place to handle AoC/DSP mailboxes */
+
+int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
+				     struct edgetpu_ext_mailbox *ext_mbox)
+{
+	return -ENODEV;
+}
+
+int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
+				     struct edgetpu_ext_mailbox *ext_mbox)
+{
+	return -ENODEV;
+}
+
+void edgetpu_chip_client_remove(struct edgetpu_client *client)
+{
+}

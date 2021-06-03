@@ -18,6 +18,7 @@
 #include "edgetpu-kci.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-mmu.h"
+#include "edgetpu-wakelock.h"
 #include "edgetpu.h"
 
 /*
@@ -541,9 +542,9 @@ void edgetpu_mailbox_free_queue(struct edgetpu_dev *etdev,
 /*
  * Creates a mailbox manager, one edgetpu device has one manager.
  */
-struct edgetpu_mailbox_manager *edgetpu_mailbox_create_mgr(
-		struct edgetpu_dev *etdev,
-		const struct edgetpu_mailbox_manager_desc *desc)
+struct edgetpu_mailbox_manager *
+edgetpu_mailbox_create_mgr(struct edgetpu_dev *etdev,
+			   const struct edgetpu_mailbox_manager_desc *desc)
 {
 	struct edgetpu_mailbox_manager *mgr;
 	uint total = 0;
@@ -574,6 +575,7 @@ struct edgetpu_mailbox_manager *edgetpu_mailbox_create_mgr(
 	if (!mgr->mailboxes)
 		return ERR_PTR(-ENOMEM);
 	rwlock_init(&mgr->mailboxes_lock);
+	mutex_init(&mgr->open_devices.lock);
 
 	return mgr;
 }
@@ -709,11 +711,157 @@ void edgetpu_mailbox_restore_active_vii_queues(struct edgetpu_dev *etdev)
 {
 	struct edgetpu_list_group *l;
 	struct edgetpu_device_group *group;
+	struct edgetpu_device_group **groups;
+	size_t i, n = 0;
 
 	mutex_lock(&etdev->groups_lock);
+	groups = kmalloc_array(etdev->n_groups, sizeof(*groups), GFP_KERNEL);
+	if (unlikely(!groups)) {
+		/*
+		 * Either the runtime is misbehaving (creates tons of groups),
+		 * or the system is indeed OOM - we give up this restore
+		 * process, which makes the runtime unable to communicate with
+		 * the device through VII.
+		 */
+		mutex_unlock(&etdev->groups_lock);
+		return;
+	}
+	/*
+	 * Fetch the groups into an array to restore the VII without holding
+	 * etdev->groups_lock. To prevent the potential deadlock that
+	 * edgetpu_device_group_add() holds group->lock then etdev->groups_lock.
+	 */
 	etdev_for_each_group(etdev, l, group) {
-		if (!edgetpu_group_mailbox_detached_locked(group))
-			edgetpu_mailbox_reinit_vii(group);
+		/*
+		 * Quick skip without holding group->lock.
+		 * Disbanded groups can never go back to the normal state.
+		 */
+		if (edgetpu_device_group_is_disbanded(group))
+			continue;
+		/*
+		 * Increase the group reference to prevent the group being
+		 * released after we release groups_lock.
+		 */
+		groups[n++] = edgetpu_device_group_get(group);
 	}
 	mutex_unlock(&etdev->groups_lock);
+
+	/*
+	 * We are not holding @etdev->groups_lock, what may race is:
+	 *   1. The group is disbanding and being removed from @etdev.
+	 *   2. A new group is adding to @etdev
+	 *
+	 * For (1.) the group will be marked as DISBANDED, so we check whether
+	 * the group is finalized before performing VII re-init.
+	 *
+	 * For (2.), adding group to @etdev (edgetpu_device_group_add()) has
+	 * nothing to do with VII, its VII will be set when the group is
+	 * finalized.
+	 */
+	for (i = 0; i < n; i++) {
+		group = groups[i];
+		mutex_lock(&group->lock);
+		/*
+		 * If the group is just finalized or has mailbox attached in
+		 * another process, this re-init is redundant but isn't harmful.
+		 */
+		if (edgetpu_group_finalized_and_attached(group))
+			edgetpu_mailbox_reinit_vii(group);
+		mutex_unlock(&group->lock);
+		edgetpu_device_group_put(group);
+	}
+	kfree(groups);
+}
+
+int edgetpu_mailbox_enable_ext(struct edgetpu_client *client, u32 mailbox_ids)
+{
+	int ret;
+
+	if (!edgetpu_wakelock_lock(client->wakelock)) {
+		etdev_err(client->etdev,
+			  "Enabling mailboxes %08x needs wakelock acquired\n",
+			  mailbox_ids);
+		edgetpu_wakelock_unlock(client->wakelock);
+		return -EAGAIN;
+	}
+
+	edgetpu_wakelock_inc_event_locked(client->wakelock,
+					  EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
+
+	etdev_dbg(client->etdev, "Enabling mailboxes: %08X\n", mailbox_ids);
+
+	ret = edgetpu_mailbox_activate(client->etdev, mailbox_ids);
+	if (ret)
+		etdev_err(client->etdev, "Activate mailboxes %08x failed: %d",
+			  mailbox_ids, ret);
+	edgetpu_wakelock_unlock(client->wakelock);
+	return ret;
+}
+
+int edgetpu_mailbox_disable_ext(struct edgetpu_client *client, u32 mailbox_ids)
+{
+	int ret;
+
+	if (!edgetpu_wakelock_lock(client->wakelock)) {
+		etdev_err(client->etdev,
+			  "Disabling mailboxes %08x needs wakelock acquired\n",
+			  mailbox_ids);
+		edgetpu_wakelock_unlock(client->wakelock);
+		return -EAGAIN;
+	}
+
+	edgetpu_wakelock_dec_event_locked(client->wakelock,
+					  EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
+
+	etdev_dbg(client->etdev, "Disabling mailbox: %08X\n", mailbox_ids);
+	ret = edgetpu_mailbox_deactivate(client->etdev, mailbox_ids);
+
+	if (ret)
+		etdev_err(client->etdev, "Deactivate mailboxes %08x failed: %d",
+			  mailbox_ids, ret);
+	edgetpu_wakelock_unlock(client->wakelock);
+	return ret;
+}
+
+int edgetpu_mailbox_activate(struct edgetpu_dev *etdev, u32 mailbox_ids)
+{
+	struct edgetpu_handshake *eh = &etdev->mailbox_manager->open_devices;
+	u32 to_send;
+	int ret = 0;
+
+	mutex_lock(&eh->lock);
+	to_send = mailbox_ids & ~eh->fw_state;
+	if (to_send)
+		ret = edgetpu_kci_open_device(etdev->kci, to_send);
+	if (!ret) {
+		eh->state |= mailbox_ids;
+		eh->fw_state |= mailbox_ids;
+	}
+	mutex_unlock(&eh->lock);
+	return ret;
+}
+
+int edgetpu_mailbox_deactivate(struct edgetpu_dev *etdev, u32 mailbox_ids)
+{
+	struct edgetpu_handshake *eh = &etdev->mailbox_manager->open_devices;
+	u32 to_send;
+	int ret = 0;
+
+	mutex_lock(&eh->lock);
+	to_send = mailbox_ids & eh->fw_state;
+	if (to_send)
+		ret = edgetpu_kci_close_device(etdev->kci, to_send);
+	if (!ret) {
+		eh->state &= ~mailbox_ids;
+		eh->fw_state &= ~mailbox_ids;
+	}
+	mutex_unlock(&eh->lock);
+	return ret;
+}
+
+void edgetpu_handshake_clear_fw_state(struct edgetpu_handshake *eh)
+{
+	mutex_lock(&eh->lock);
+	eh->fw_state = 0;
+	mutex_unlock(&eh->lock);
 }

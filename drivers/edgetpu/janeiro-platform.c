@@ -146,7 +146,7 @@ janeiro_platform_unmap_reserved_region(struct janeiro_platform_dev *etpdev)
 			EDGETPU_CONTEXT_KCI);
 }
 
-int edgetpu_setup_mmu(struct edgetpu_dev *etdev)
+int edgetpu_chip_setup_mmu(struct edgetpu_dev *etdev)
 {
 	int ret;
 
@@ -154,6 +154,11 @@ int edgetpu_setup_mmu(struct edgetpu_dev *etdev)
 	if (ret)
 		dev_err(etdev->dev, "failed to attach IOMMU: %d\n", ret);
 	return ret;
+}
+
+void edgetpu_chip_remove_mmu(struct edgetpu_dev *etdev)
+{
+	edgetpu_mmu_detach(etdev);
 }
 
 #define EDGETPU_PSM0_CFG 0x1c1880

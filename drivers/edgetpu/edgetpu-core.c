@@ -70,9 +70,8 @@ static int edgetpu_mmap_full_csr(struct edgetpu_client *client,
 	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID))
 		return -EPERM;
 	vma_size = vma->vm_end - vma->vm_start;
-	map_size = min(vma_size, client->reg_window.size);
-	phys_base = client->etdev->regs.phys +
-		client->reg_window.start_reg_offset;
+	map_size = min_t(ulong, vma_size, client->etdev->regs.size);
+	phys_base = client->etdev->regs.phys;
 	ret = io_remap_pfn_range(vma, vma->vm_start, phys_base >> PAGE_SHIFT,
 				 map_size, vma->vm_page_prot);
 	if (ret)
@@ -367,7 +366,6 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 			 etdev->mcp_die_index);
 	}
 
-	mutex_init(&etdev->open.lock);
 	mutex_init(&etdev->groups_lock);
 	INIT_LIST_HEAD(&etdev->groups);
 	etdev->n_groups = 0;
@@ -391,7 +389,7 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 			etdev->dev_name, ret);
 		goto remove_dev;
 	}
-	ret = edgetpu_setup_mmu(etdev);
+	ret = edgetpu_chip_setup_mmu(etdev);
 	if (ret)
 		goto remove_dev;
 
@@ -400,20 +398,20 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	etdev->kci = devm_kzalloc(etdev->dev, sizeof(*etdev->kci), GFP_KERNEL);
 	if (!etdev->kci) {
 		ret = -ENOMEM;
-		goto detach_mmu;
+		goto remove_usage_stats;
 	}
 
 	etdev->telemetry =
 		devm_kzalloc(etdev->dev, sizeof(*etdev->telemetry), GFP_KERNEL);
 	if (!etdev->telemetry) {
 		ret = -ENOMEM;
-		goto detach_mmu;
+		goto remove_usage_stats;
 	}
 
 	ret = edgetpu_kci_init(etdev->mailbox_manager, etdev->kci);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_kci_init returns %d\n", ret);
-		goto detach_mmu;
+		goto remove_usage_stats;
 	}
 
 	ret = edgetpu_device_dram_init(etdev);
@@ -434,9 +432,9 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 remove_kci:
 	/* releases the resources of KCI */
 	edgetpu_mailbox_remove_all(etdev->mailbox_manager);
-detach_mmu:
+remove_usage_stats:
 	edgetpu_usage_stats_exit(etdev);
-	edgetpu_mmu_detach(etdev);
+	edgetpu_chip_remove_mmu(etdev);
 remove_dev:
 	edgetpu_mark_probe_fail(etdev);
 	edgetpu_fs_remove(etdev);
@@ -450,7 +448,7 @@ void edgetpu_device_remove(struct edgetpu_dev *etdev)
 	edgetpu_device_dram_exit(etdev);
 	edgetpu_mailbox_remove_all(etdev->mailbox_manager);
 	edgetpu_usage_stats_exit(etdev);
-	edgetpu_mmu_detach(etdev);
+	edgetpu_chip_remove_mmu(etdev);
 	edgetpu_fs_remove(etdev);
 }
 
@@ -467,9 +465,6 @@ struct edgetpu_client *edgetpu_client_add(struct edgetpu_dev *etdev)
 		return ERR_PTR(-ENOMEM);
 	}
 
-	/* Allow entire CSR space to be mmap()'ed using 1.0 interface */
-	client->reg_window.start_reg_offset = 0;
-	client->reg_window.size = etdev->regs.size;
 	client->pid = current->pid;
 	client->tgid = current->tgid;
 	client->etdev = etdev;
@@ -527,6 +522,7 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 	    1 << perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE))
 		edgetpu_telemetry_unset_event(etdev, EDGETPU_TELEMETRY_TRACE);
 
+	edgetpu_chip_client_remove(client);
 	edgetpu_client_put(client);
 }
 
@@ -583,13 +579,15 @@ void edgetpu_free_coherent(struct edgetpu_dev *etdev,
 void edgetpu_handle_firmware_crash(struct edgetpu_dev *etdev,
 				   enum edgetpu_fw_crash_type crash_type)
 {
-	etdev_err(etdev, "firmware crashed: %u", crash_type);
-	etdev->firmware_crash_count++;
-	edgetpu_fatal_error_notify(etdev);
-
-	if (crash_type == EDGETPU_FW_CRASH_UNRECOV_FAULT)
+	if (crash_type == EDGETPU_FW_CRASH_UNRECOV_FAULT) {
+		etdev_err(etdev, "firmware unrecoverable crash");
+		etdev->firmware_crash_count++;
+		edgetpu_fatal_error_notify(etdev);
 		/* Restart firmware without chip reset */
 		edgetpu_watchdog_bite(etdev, false);
+	} else {
+		etdev_err(etdev, "firmware crash event: %u", crash_type);
+	}
 }
 
 int __init edgetpu_init(void)
