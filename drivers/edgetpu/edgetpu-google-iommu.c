@@ -71,6 +71,9 @@ get_domain_by_context_id(struct edgetpu_dev *etdev,
 	struct edgetpu_iommu *etiommu = etdev->mmu_cookie;
 	uint pasid;
 
+	/* always return the default domain when AUX is not supported */
+	if (!etiommu->aux_enabled)
+		return iommu_get_domain_for_dev(dev);
 	if (ctx_id == EDGETPU_CONTEXT_INVALID)
 		return NULL;
 	if (ctx_id & EDGETPU_CONTEXT_DOMAIN_TOKEN)
@@ -240,13 +243,10 @@ int edgetpu_mmu_attach(struct edgetpu_dev *etdev, void *mmu_info)
 	idr_init(&etiommu->domain_pool);
 	mutex_init(&etiommu->pool_lock);
 	etiommu->iommu_group = iommu_group_get(etdev->dev);
-	if (etiommu->iommu_group) {
+	if (etiommu->iommu_group)
 		iommu_group_set_name(etiommu->iommu_group, "edgetpu");
-		dev_dbg(etdev->dev, "iommu group id %d setup\n",
-			iommu_group_id(etiommu->iommu_group));
-	} else {
+	else
 		dev_warn(etdev->dev, "device has no iommu group\n");
-	}
 
 	iommu_dev_enable_feature(etdev->dev, IOMMU_DEV_FEAT_AUX);
 	if (!iommu_dev_feature_enabled(etdev->dev, IOMMU_DEV_FEAT_AUX))
@@ -630,19 +630,22 @@ static struct edgetpu_iommu_domain invalid_etdomain = {
 
 struct edgetpu_iommu_domain *edgetpu_mmu_alloc_domain(struct edgetpu_dev *etdev)
 {
-	struct edgetpu_iommu_domain *etdomain =
-		kzalloc(sizeof(*etdomain), GFP_KERNEL);
+	struct edgetpu_iommu_domain *etdomain;
 	struct edgetpu_iommu *etiommu = etdev->mmu_cookie;
 	struct iommu_domain *domain;
 	int token;
 
-	if (!etdomain)
-		return NULL;
 	if (!etiommu->aux_enabled)
 		return &invalid_etdomain;
 	domain = iommu_domain_alloc(etdev->dev->bus);
 	if (!domain) {
 		etdev_warn(etdev, "iommu domain alloc failed");
+		return NULL;
+	}
+
+	etdomain = kzalloc(sizeof(*etdomain), GFP_KERNEL);
+	if (!etdomain) {
+		iommu_domain_free(domain);
 		return NULL;
 	}
 
@@ -652,9 +655,11 @@ struct edgetpu_iommu_domain *edgetpu_mmu_alloc_domain(struct edgetpu_dev *etdev)
 	mutex_unlock(&etiommu->pool_lock);
 	if (token < 0) {
 		etdev_warn(etdev, "alloc iommu domain token failed: %d", token);
+		kfree(etdomain);
 		iommu_domain_free(domain);
 		return NULL;
 	}
+
 	edgetpu_init_etdomain(etdomain, domain, token);
 	return etdomain;
 }

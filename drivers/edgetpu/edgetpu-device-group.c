@@ -156,7 +156,16 @@ static void edgetpu_device_group_kci_leave(struct edgetpu_device_group *group)
 {
 #ifdef EDGETPU_HAS_MULTI_GROUPS
 	edgetpu_kci_update_usage_async(group->etdev);
-	return edgetpu_group_kci_close_device(group);
+	/*
+	 * Theoretically we don't need to check @dev_inaccessible here.
+	 * @dev_inaccessible is true implies the client has wakelock count zero, under such case
+	 * edgetpu_mailbox_deactivate() has been called on releasing the wakelock and therefore this
+	 * edgetpu_group_kci_close_device() call won't send any KCI.
+	 * Still have a check here in case this function does CSR programming other than calling
+	 * edgetpu_mailbox_deactivate() someday.
+	 */
+	if (!group->dev_inaccessible)
+		edgetpu_group_kci_close_device(group);
 #else /* !EDGETPU_HAS_MULTI_GROUPS */
 	struct kci_worker_param *params =
 		kmalloc_array(group->n_clients, sizeof(*params), GFP_KERNEL);

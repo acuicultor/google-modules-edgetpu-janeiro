@@ -40,11 +40,11 @@
 
 /*
  * Instruction remap registers make carveout memory appear at address
- * 0x10000000 from the R52 perspective
+ * 0x10000000 from the TPU CPU perspective
  */
 #define EDGETPU_INSTRUCTION_REMAP_BASE		0x10000000
 
-/* Address from which the R52 can access data in the remapped region */
+/* Address from which the TPU CPU can access data in the remapped region */
 #define EDGETPU_REMAPPED_DATA_ADDR                                        \
 	(EDGETPU_INSTRUCTION_REMAP_BASE + EDGETPU_REMAPPED_DATA_OFFSET)
 #include "config-mailbox.h"

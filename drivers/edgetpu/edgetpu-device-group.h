@@ -69,6 +69,22 @@ struct edgetpu_device_group {
 	 * creating this group.
 	 */
 	bool mailbox_detachable;
+	/*
+	 * Whether group->etdev is inaccessible.
+	 * Some group operations will access device CSRs. If the device is known to be
+	 * inaccessible (typically not powered on) then set this field to true to
+	 * prevent HW interactions.
+	 *
+	 * This field is always false for !EDGETPU_HAS_WAKELOCK chipsets.
+	 *
+	 * For EDGETPU_HAS_MCP chipsets this field should be replaced with a
+	 * boolean array with size @n_clients, but we don't have a chipset with
+	 * EDGETPU_HAS_MCP && EDGETPU_HAS_WAKELOCK yet.
+	 *
+	 * Is not protected by @lock because this is only written when releasing the
+	 * leader of this group.
+	 */
+	bool dev_inaccessible;
 
 	/* protects everything in the following comment block */
 	struct mutex lock;

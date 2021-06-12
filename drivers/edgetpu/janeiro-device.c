@@ -12,6 +12,7 @@
 #include "edgetpu-mailbox.h"
 #include "edgetpu-telemetry.h"
 #include "janeiro-platform.h"
+#include "janeiro-pm.h"
 
 static irqreturn_t janeiro_mailbox_handle_irq(struct edgetpu_dev *etdev,
 					      int irq)
@@ -83,11 +84,29 @@ struct edgetpu_dumpregs_range edgetpu_chip_tile_statusregs_ranges[] = {
 int edgetpu_chip_tile_statusregs_nranges =
 	ARRAY_SIZE(edgetpu_chip_tile_statusregs_ranges);
 
+static void edgetpu_chip_set_pm_qos(struct edgetpu_dev *etdev, u32 value)
+{
+}
+
+static void edgetpu_chip_set_bts(struct edgetpu_dev *etdev, u32 value)
+{
+}
+
 void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
 				    struct edgetpu_kci_response_element *resp)
 {
-	etdev_warn(etdev, "%s: Unrecognized KCI request: %u\n", __func__,
-		   resp->code);
+	switch (resp->code) {
+	case RKCI_CODE_PM_QOS:
+		edgetpu_chip_set_pm_qos(etdev, resp->retval);
+		break;
+	case RKCI_CODE_BTS:
+		edgetpu_chip_set_bts(etdev, resp->retval);
+		break;
+	default:
+		etdev_warn(etdev, "%s: Unrecognized KCI request: %u\n",
+			   __func__, resp->code);
+		break;
+	}
 }
 
 

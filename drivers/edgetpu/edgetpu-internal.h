@@ -416,7 +416,7 @@ int edgetpu_get_state_errno_locked(struct edgetpu_dev *etdev);
 
 /*
  * "External mailboxes" below refers to mailboxes that are not handled
- * directly by the DarwiNN runtime, such as secure or device-to-device.
+ * directly by the runtime, such as secure or device-to-device.
  *
  * Chip specific code will typically keep track of state and inform the firmware
  * that a mailbox has become active/inactive.

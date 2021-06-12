@@ -13,6 +13,7 @@
 #include <linux/platform_device.h>
 
 #include "edgetpu-config.h"
+#include "edgetpu-debug-dump.h"
 #include "edgetpu-firmware.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-iremap-pool.h"
@@ -100,52 +101,6 @@ janeiro_platform_cleanup_fw_region(struct janeiro_platform_dev *etpdev)
 	etpdev->shared_mem_vaddr = NULL;
 }
 
-static int
-janeiro_platform_map_reserved_region(struct janeiro_platform_dev *etpdev)
-{
-	int ret;
-	struct edgetpu_dev *etdev = &etpdev->edgetpu_dev;
-
-	ret = edgetpu_mmu_add_translation(etdev, etpdev->fw_region_paddr,
-		etpdev->fw_region_paddr, etpdev->fw_region_size,
-		IOMMU_READ | IOMMU_WRITE, EDGETPU_CONTEXT_KCI);
-	if (ret) {
-		dev_err(etdev->dev,
-			"Unable to map reserved area for firmware\n");
-		return ret;
-	}
-	ret = edgetpu_mmu_add_translation(etdev,
-			etpdev->fw_region_paddr + etpdev->fw_region_size,
-			etpdev->fw_region_paddr + etpdev->fw_region_size,
-			EDGETPU_REMAPPED_DATA_SIZE, IOMMU_READ | IOMMU_WRITE,
-			EDGETPU_CONTEXT_KCI);
-	if (ret) {
-		dev_err(etdev->dev,
-			"Unable to map reserved area for data\n");
-		edgetpu_mmu_remove_translation(etdev,
-					       etpdev->fw_region_paddr,
-					       etpdev->fw_region_size,
-					       EDGETPU_CONTEXT_KCI);
-		return ret;
-	}
-	return 0;
-}
-
-static void
-janeiro_platform_unmap_reserved_region(struct janeiro_platform_dev *etpdev)
-{
-	struct edgetpu_dev *etdev = &etpdev->edgetpu_dev;
-
-	edgetpu_mmu_remove_translation(etdev,
-			etpdev->fw_region_paddr + etpdev->fw_region_size,
-			EDGETPU_REMAPPED_DATA_SIZE,
-			EDGETPU_CONTEXT_KCI);
-	edgetpu_mmu_remove_translation(etdev,
-			etpdev->fw_region_paddr,
-			etpdev->fw_region_size,
-			EDGETPU_CONTEXT_KCI);
-}
-
 int edgetpu_chip_setup_mmu(struct edgetpu_dev *etdev)
 {
 	int ret;
@@ -159,41 +114,6 @@ int edgetpu_chip_setup_mmu(struct edgetpu_dev *etdev)
 void edgetpu_chip_remove_mmu(struct edgetpu_dev *etdev)
 {
 	edgetpu_mmu_detach(etdev);
-}
-
-#define EDGETPU_PSM0_CFG 0x1c1880
-#define EDGETPU_PSM0_START 0x1c1884
-#define EDGETPU_PSM0_STATUS 0x1c1888
-#define EDGETPU_PSM1_CFG 0x1c2880
-#define EDGETPU_PSM1_START 0x1c2884
-#define EDGETPU_PSM1_STATUS 0x1c2888
-//TODO: set timeout lower for silicon
-#define EDGETPU_LPM_CHANGE_TIMEOUT	30000
-
-static int janeiro_set_lpm(struct edgetpu_dev *etdev)
-{
-	int ret;
-	u32 val;
-
-	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_START, 1);
-	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM0_STATUS, val,
-				 val & 0x80, 5, EDGETPU_LPM_CHANGE_TIMEOUT);
-	if (ret) {
-		etdev_err(etdev, "Set LPM0 failed: %d\n", ret);
-		return ret;
-	}
-	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM1_START, 1);
-	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM1_STATUS, val,
-				 val & 0x80, 5, EDGETPU_LPM_CHANGE_TIMEOUT);
-	if (ret) {
-		etdev_err(etdev, "Set LPM1 failed: %d\n", ret);
-		return ret;
-	}
-
-	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_CFG, 0);
-	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM1_CFG, 0);
-
-	return 0;
 }
 
 /*
@@ -311,14 +231,6 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 		goto out_remove_device;
 	}
 
-	ret = janeiro_set_lpm(&edgetpu_pdev->edgetpu_dev);
-	if (ret)
-		dev_err(dev, "LPM init failed: %d\n", ret);
-
-	ret = janeiro_platform_map_reserved_region(edgetpu_pdev);
-	if (ret)
-		goto out_remove_device;
-
 	janeiro_get_telemetry_mem(edgetpu_pdev, EDGETPU_TELEMETRY_LOG,
 				  &edgetpu_pdev->log_mem);
 	janeiro_get_telemetry_mem(edgetpu_pdev, EDGETPU_TELEMETRY_TRACE,
@@ -328,7 +240,7 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 				     &edgetpu_pdev->log_mem,
 				     &edgetpu_pdev->trace_mem);
 	if (ret)
-		goto out_unmap_reserved;
+		goto out_remove_device;
 
 	ret = mobile_edgetpu_firmware_create(&edgetpu_pdev->edgetpu_dev);
 	if (ret) {
@@ -340,18 +252,13 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 	dev_info(dev, "%s edgetpu initialized. Build: %s\n",
 		 edgetpu_pdev->edgetpu_dev.dev_name, GIT_REPO_TAG);
 
-	ret = edgetpu_chip_firmware_run(&edgetpu_pdev->edgetpu_dev,
-					EDGETPU_DEFAULT_FIRMWARE_NAME, 0);
-	if (ret)
-		dev_err(dev, "failed to run firmware: %d\n", ret);
+	edgetpu_pm_shutdown(&edgetpu_pdev->edgetpu_dev, false);
 out:
 	dev_dbg(dev, "Probe finished\n");
 
 	return 0;
 out_tel_exit:
 	edgetpu_telemetry_exit(&edgetpu_pdev->edgetpu_dev);
-out_unmap_reserved:
-	janeiro_platform_unmap_reserved_region(edgetpu_pdev);
 out_remove_device:
 	edgetpu_device_remove(&edgetpu_pdev->edgetpu_dev);
 out_destroy_iremap:
@@ -368,14 +275,26 @@ static int edgetpu_platform_remove(struct platform_device *pdev)
 	struct edgetpu_dev *etdev = platform_get_drvdata(pdev);
 	struct janeiro_platform_dev *janeiro_pdev = to_janeiro_dev(etdev);
 
-	mobile_edgetpu_firmware_destroy(etdev);
+	/* TODO(b/189906347): Use edgetpu_device_remove() for cleanup after
+	 * having GSA/TZ support.
+	 */
+	edgetpu_pm_get(etdev->pm);
+
 	for (i = 0; i < EDGETPU_NCONTEXTS; i++) {
 		if (janeiro_pdev->irq[i] >= 0)
 			edgetpu_unregister_irq(etdev, janeiro_pdev->irq[i]);
 	}
 
-	janeiro_platform_unmap_reserved_region(janeiro_pdev);
-	edgetpu_device_remove(etdev);
+	edgetpu_telemetry_exit(etdev);
+	edgetpu_chip_exit(etdev);
+	edgetpu_debug_dump_exit(etdev);
+	edgetpu_mailbox_remove_all(etdev->mailbox_manager);
+	mobile_edgetpu_firmware_destroy(etdev);
+	edgetpu_pm_put(etdev->pm);
+	edgetpu_pm_shutdown(etdev, true);
+	edgetpu_usage_stats_exit(etdev);
+	edgetpu_chip_remove_mmu(etdev);
+	edgetpu_fs_remove(etdev);
 	edgetpu_iremap_pool_destroy(etdev);
 	janeiro_platform_cleanup_fw_region(janeiro_pdev);
 	janeiro_pm_destroy(etdev);

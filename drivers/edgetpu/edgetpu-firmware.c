@@ -180,7 +180,7 @@ static int edgetpu_firmware_load_locked(
 	if (handlers && handlers->alloc_buffer) {
 		ret = handlers->alloc_buffer(et_fw, &fw_desc->buf);
 		if (ret) {
-			etdev_dbg(etdev, "handler alloc_buffer failed: %d\n",
+			etdev_err(etdev, "handler alloc_buffer failed: %d\n",
 				  ret);
 			return ret;
 		}
@@ -188,14 +188,14 @@ static int edgetpu_firmware_load_locked(
 
 	ret = edgetpu_firmware_do_load_locked(et_fw, fw_desc, name);
 	if (ret) {
-		etdev_dbg(etdev, "firmware request failed: %d\n", ret);
+		etdev_err(etdev, "firmware request failed: %d\n", ret);
 		goto out_free_buffer;
 	}
 
 	if (handlers && handlers->setup_buffer) {
 		ret = handlers->setup_buffer(et_fw, &fw_desc->buf);
 		if (ret) {
-			etdev_dbg(etdev, "handler setup_buffer failed: %d\n",
+			etdev_err(etdev, "handler setup_buffer failed: %d\n",
 				  ret);
 			goto out_do_unload_locked;
 		}
@@ -467,7 +467,7 @@ int edgetpu_firmware_run_locked(struct edgetpu_firmware *et_fw,
 	}
 
 	/*
-	 * Previous firmware buffer is not used anymore when R52 runs on
+	 * Previous firmware buffer is not used anymore when the CPU runs on
 	 * new firmware buffer. Unload this before et_fw->p->fw_buf is
 	 * overwritten by new buffer information.
 	 */

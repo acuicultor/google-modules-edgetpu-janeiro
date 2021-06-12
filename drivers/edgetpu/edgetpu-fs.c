@@ -107,16 +107,18 @@ static int edgetpu_fs_release(struct inode *inode, struct file *file)
 	wakelock_count = edgetpu_wakelock_lock(client->wakelock);
 	mutex_lock(&client->group_lock);
 	/*
-	 * @wakelock = 0 means the device might be powered off. And for group with a non-detachable
-	 * mailbox, its mailbox is removed when the group is released, in such case we need to
-	 * ensure the device is powered to prevent kernel panic on programming VII mailbox CSRs.
-	 *
-	 * For mailbox-detachable groups the mailbox had been removed when the wakelock was
-	 * released, edgetpu_device_group_release() doesn't need the device be powered in this case.
+	 * @wakelock_count = 0 means the device might be powered off. Mailbox is removed when the
+	 * group is released, we need to ensure the device is powered to prevent kernel panic on
+	 * programming VII mailbox CSRs.
+	 * If the device is known to be not powered then simply set dev_inaccessible to true to
+	 * prevent device interactions during group releasing.
 	 */
-	if (!wakelock_count && client->group && !client->group->mailbox_detachable) {
-		wakelock_count = 1;
-		edgetpu_pm_get(etdev->pm);
+	if (!wakelock_count && client->group) {
+		/* assumes @group->etdev == @client->etdev, i.e. @client is the leader of @group */
+		if (edgetpu_pm_get_if_powered(etdev->pm))
+			wakelock_count = 1;
+		else
+			client->group->dev_inaccessible = true;
 	}
 	mutex_unlock(&client->group_lock);
 	edgetpu_wakelock_unlock(client->wakelock);
@@ -933,8 +935,10 @@ static void edgetpu_fs_setup_debugfs(struct edgetpu_dev *etdev)
 {
 	etdev->d_entry =
 		debugfs_create_dir(etdev->dev_name, edgetpu_debugfs_dir);
-	if (!etdev->d_entry)
+	if (IS_ERR_OR_NULL(etdev->d_entry)) {
+		etdev_warn(etdev, "Failed to setup debugfs\n");
 		return;
+	}
 	debugfs_create_file("mappings", 0440, etdev->d_entry,
 			    etdev, &mappings_ops);
 	debugfs_create_file("statusregs", 0440, etdev->d_entry, etdev,
@@ -1036,18 +1040,16 @@ static const struct file_operations syncfences_ops = {
 	.release = single_release,
 };
 
-static int edgetpu_debugfs_global_setup(void)
+static void edgetpu_debugfs_global_setup(void)
 {
 	edgetpu_debugfs_dir = debugfs_create_dir("edgetpu", NULL);
-	if (IS_ERR(edgetpu_debugfs_dir)) {
-		pr_err(DRIVER_NAME " error creating edgetpu debugfs dir: %ld\n",
-		       PTR_ERR(edgetpu_debugfs_dir));
-		return PTR_ERR(edgetpu_debugfs_dir);
+	if (IS_ERR_OR_NULL(edgetpu_debugfs_dir)) {
+		pr_warn(DRIVER_NAME " error creating edgetpu debugfs dir\n");
+		return;
 	}
 
 	debugfs_create_file("syncfences", 0440, edgetpu_debugfs_dir, NULL,
 			    &syncfences_ops);
-	return 0;
 }
 
 int __init edgetpu_fs_init(void)

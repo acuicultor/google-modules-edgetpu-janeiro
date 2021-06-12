@@ -53,10 +53,10 @@ struct janeiro_firmware_data {
 	struct iommu_mapping mappings[MAX_IOMMU_MAPPINGS];
 };
 /*
- * Sets the reset state of the R52 core.
+ * Sets the reset state of the TPU CPU.
  * @val: 1 to put the core in reset state, 0 to release core from reset state.
  */
-static void r52_reset(struct edgetpu_dev *etdev, u64 val)
+static void tpu_cpu_reset(struct edgetpu_dev *etdev, u64 val)
 {
 	edgetpu_dev_write_32_sync(etdev, EDGETPU_REG_RESET_CONTROL, val);
 }
@@ -79,6 +79,7 @@ static void janeiro_firmware_before_destroy(struct edgetpu_firmware *et_fw)
 	u32 i, tpu_addr, size;
 	struct edgetpu_dev *etdev = et_fw->etdev;
 
+	tpu_cpu_reset(et_fw->etdev, 1);
 	/* TODO(b/189906347): Remove when GSA/TZ support is available. */
 	/* Remove mappings created by setup_buffer() */
 	data = edgetpu_firmware_get_data(et_fw);
@@ -93,7 +94,6 @@ static void janeiro_firmware_before_destroy(struct edgetpu_firmware *et_fw)
 		edgetpu_firmware_set_data(et_fw, NULL);
 		kfree(data);
 	}
-	r52_reset(et_fw->etdev, 1);
 }
 
 static int janeiro_firmware_alloc_buffer(struct edgetpu_firmware *et_fw,
@@ -237,16 +237,12 @@ static int janeiro_firmware_prepare_run(struct edgetpu_firmware *et_fw,
 //				   fw_buf->used_size - JANEIRO_FW_HEADER_SIZE,
 //				   DMA_TO_DEVICE);
 #endif
-	r52_reset(etdev, 1);
+	tpu_cpu_reset(etdev, 1);
 
 	/* Reset KCI mailbox before starting f/w, don't process anything old.*/
 	edgetpu_mailbox_reset(etdev->kci->mailbox);
 
-	/* Remap TPU CPU instructions to the carveout IOVA. */
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_NEW_BASE,
-			     /*FW_IOVA*/ fw_dma_addr);
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_CONTROL, 1);
-	r52_reset(etdev, 0);
+	tpu_cpu_reset(etdev, 0);
 	//TODO: cleanup
 	return ret;
 }
