@@ -18,7 +18,6 @@
 #include "edgetpu-kci.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-pm.h"
-#include "edgetpu-telemetry.h"
 #include "janeiro-platform.h"
 #include "janeiro-pm.h"
 
@@ -234,7 +233,6 @@ static int janeiro_set_lpm(struct edgetpu_dev *etdev)
 static int janeiro_power_up(struct edgetpu_pm *etpm)
 {
 	struct edgetpu_dev *etdev = etpm->etdev;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
 	int ret = 0;
 
 	ret = janeiro_pwr_state_set(
@@ -246,12 +244,6 @@ static int janeiro_power_up(struct edgetpu_pm *etpm)
 		return ret;
 
 	janeiro_set_lpm(etdev);
-
-	/* Clear out log / trace buffers */
-	memset(edgetpu_pdev->log_mem.vaddr, 0, EDGETPU_TELEMETRY_BUFFER_SIZE);
-#if IS_ENABLED(CONFIG_EDGETPU_TELEMETRY_TRACE)
-	memset(edgetpu_pdev->trace_mem.vaddr, 0, EDGETPU_TELEMETRY_BUFFER_SIZE);
-#endif
 
 	edgetpu_chip_init(etdev);
 

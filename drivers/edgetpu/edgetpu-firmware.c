@@ -14,6 +14,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 
+#include "edgetpu.h"
 #include "edgetpu-device-group.h"
 #include "edgetpu-firmware.h"
 #include "edgetpu-firmware-util.h"
@@ -698,54 +699,6 @@ static const struct attribute_group edgetpu_firmware_attr_group = {
 	.attrs = dev_attrs,
 };
 
-/*
- * Sets all groups related to @etdev as errored.
- */
-static void edgetpu_set_groups_error(struct edgetpu_dev *etdev)
-{
-	size_t i, num_groups = 0;
-	struct edgetpu_device_group *group;
-	struct edgetpu_device_group **groups;
-	struct edgetpu_list_group *g;
-
-	mutex_lock(&etdev->groups_lock);
-	groups = kmalloc_array(etdev->n_groups, sizeof(*groups), GFP_KERNEL);
-	if (unlikely(!groups)) {
-		/*
-		 * Just give up setting status in this case, this only happens
-		 * when the system is OOM.
-		 */
-		mutex_unlock(&etdev->groups_lock);
-		edgetpu_fatal_error_notify(etdev);
-		return;
-	}
-	/*
-	 * Fetch the groups into an array to set the group status without
-	 * holding @etdev->groups_lock. To prevent the potential deadlock that
-	 * edgetpu_device_group_add() holds group->lock then etdev->groups_lock.
-	 */
-	etdev_for_each_group(etdev, g, group) {
-		if (edgetpu_device_group_is_disbanded(group))
-			continue;
-		groups[num_groups++] = edgetpu_device_group_get(group);
-	}
-	mutex_unlock(&etdev->groups_lock);
-	for (i = 0; i < num_groups; i++) {
-		group = groups[i];
-		mutex_lock(&group->lock);
-		/*
-		 * Only finalized groups may have handshake with the FW, mark
-		 * them as errored.
-		 */
-		if (edgetpu_device_group_is_finalized(group))
-			group->status = EDGETPU_DEVICE_GROUP_ERRORED;
-		mutex_unlock(&group->lock);
-		edgetpu_device_group_put(group);
-	}
-	edgetpu_fatal_error_notify(etdev);
-	kfree(groups);
-}
-
 static void edgetpu_firmware_wdt_timeout_action(void *data)
 {
 	int ret;
@@ -762,7 +715,7 @@ static void edgetpu_firmware_wdt_timeout_action(void *data)
 	 * groups the CLOSE_DEVICE KCIs won't be sent.
 	 */
 	edgetpu_handshake_clear_fw_state(&etdev->mailbox_manager->open_devices);
-	edgetpu_set_groups_error(etdev);
+	edgetpu_fatal_error_notify(etdev, EDGETPU_ERROR_WATCHDOG_TIMEOUT);
 
 	/* Another procedure is loading the firmware, let it do the work. */
 	if (edgetpu_firmware_is_loading(etdev))

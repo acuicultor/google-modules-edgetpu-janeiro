@@ -6,7 +6,7 @@
  */
 
 #include <linux/atomic.h>
-#include <linux/bits.h>
+#include <linux/bitops.h>
 #include <linux/dma-direction.h>
 #include <linux/dma-mapping.h>
 #include <linux/eventfd.h>
@@ -94,7 +94,7 @@ static int edgetpu_kci_join_group_worker(struct kci_worker_param *param)
 
 	etdev_dbg(etdev, "%s: join group %u %u/%u", __func__,
 		  group->workload_id, i + 1, group->n_clients);
-	return edgetpu_kci_join_group(etdev->kci, etdev, group->n_clients, i);
+	return edgetpu_kci_join_group(etdev->kci, group->n_clients, i);
 }
 
 static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
@@ -111,7 +111,12 @@ static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
 
 #endif /* EDGETPU_HAS_MCP */
 
-static int edgetpu_group_kci_open_device(struct edgetpu_device_group *group)
+/*
+ * Activates the VII mailbox @group owns.
+ *
+ * Caller holds group->lock.
+ */
+static int edgetpu_group_activate(struct edgetpu_device_group *group)
 {
 	u8 mailbox_id;
 	int ret;
@@ -119,14 +124,22 @@ static int edgetpu_group_kci_open_device(struct edgetpu_device_group *group)
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return 0;
 	mailbox_id = edgetpu_group_context_id_locked(group);
-	ret = edgetpu_mailbox_activate(group->etdev, BIT(mailbox_id));
+	ret = edgetpu_mailbox_activate(group->etdev, mailbox_id, group->vcid, !group->activated);
 	if (ret)
-		etdev_err(group->etdev, "activate mailbox failed with %d", ret);
+		etdev_err(group->etdev, "activate mailbox for VCID %d failed with %d", group->vcid,
+			  ret);
+	else
+		group->activated = true;
 	atomic_inc(&group->etdev->job_count);
 	return ret;
 }
 
-static void edgetpu_group_kci_close_device(struct edgetpu_device_group *group)
+/*
+ * Deactivates the VII mailbox @group owns.
+ *
+ * Caller holds group->lock.
+ */
+static void edgetpu_group_deactivate(struct edgetpu_device_group *group)
 {
 	u8 mailbox_id;
 	int ret;
@@ -134,10 +147,10 @@ static void edgetpu_group_kci_close_device(struct edgetpu_device_group *group)
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return;
 	mailbox_id = edgetpu_group_context_id_locked(group);
-	ret = edgetpu_mailbox_deactivate(group->etdev, BIT(mailbox_id));
+	ret = edgetpu_mailbox_deactivate(group->etdev, mailbox_id);
 	if (ret)
-		etdev_err(group->etdev, "deactivate mailbox failed with %d",
-			  ret);
+		etdev_err(group->etdev, "deactivate mailbox for VCID %d failed with %d",
+			  group->vcid, ret);
 	return;
 }
 
@@ -160,12 +173,12 @@ static void edgetpu_device_group_kci_leave(struct edgetpu_device_group *group)
 	 * Theoretically we don't need to check @dev_inaccessible here.
 	 * @dev_inaccessible is true implies the client has wakelock count zero, under such case
 	 * edgetpu_mailbox_deactivate() has been called on releasing the wakelock and therefore this
-	 * edgetpu_group_kci_close_device() call won't send any KCI.
+	 * edgetpu_group_deactivate() call won't send any KCI.
 	 * Still have a check here in case this function does CSR programming other than calling
 	 * edgetpu_mailbox_deactivate() someday.
 	 */
 	if (!group->dev_inaccessible)
-		edgetpu_group_kci_close_device(group);
+		edgetpu_group_deactivate(group);
 #else /* !EDGETPU_HAS_MULTI_GROUPS */
 	struct kci_worker_param *params =
 		kmalloc_array(group->n_clients, sizeof(*params), GFP_KERNEL);
@@ -207,7 +220,7 @@ static int
 edgetpu_device_group_kci_finalized(struct edgetpu_device_group *group)
 {
 #ifdef EDGETPU_HAS_MULTI_GROUPS
-	return edgetpu_group_kci_open_device(group);
+	return edgetpu_group_activate(group);
 #else /* !EDGETPU_HAS_MULTI_GROUPS */
 	struct kci_worker_param *params =
 		kmalloc_array(group->n_clients, sizeof(*params), GFP_KERNEL);
@@ -462,6 +475,7 @@ static void edgetpu_device_group_release(struct edgetpu_device_group *group)
 #ifdef EDGETPU_HAS_P2P_MAILBOX
 		edgetpu_p2p_mailbox_release(group);
 #endif
+		edgetpu_mailbox_external_disable_free_locked(group);
 		edgetpu_mailbox_remove_vii(&group->vii);
 		group_release_members(group);
 	}
@@ -546,6 +560,22 @@ static int edgetpu_dev_add_group(struct edgetpu_dev *etdev,
 		goto error_unlock;
 	}
 #endif /* !EDGETPU_HAS_MULTI_GROUPS */
+	if (group->etdev == etdev) {
+		u32 vcid_pool = etdev->vcid_pool;
+
+#ifdef EDGETPU_VCID_EXTRA_PARTITION
+		if (group->mbox_attr.partition_type != EDGETPU_PARTITION_EXTRA)
+			vcid_pool &= ~BIT(EDGETPU_VCID_EXTRA_PARTITION);
+		else
+			vcid_pool &= BIT(EDGETPU_VCID_EXTRA_PARTITION);
+#endif
+		if (!vcid_pool) {
+			ret = -EBUSY;
+			goto error_unlock;
+		}
+		group->vcid = ffs(vcid_pool) - 1;
+		etdev->vcid_pool &= ~BIT(group->vcid);
+	}
 	l->grp = edgetpu_device_group_get(group);
 	list_add_tail(&l->list, &etdev->groups);
 	etdev->n_groups++;
@@ -620,6 +650,8 @@ void edgetpu_device_group_leave(struct edgetpu_client *client)
 	mutex_lock(&client->etdev->groups_lock);
 	list_for_each_entry(l, &client->etdev->groups, list) {
 		if (l->grp == group) {
+			if (group->etdev == client->etdev)
+				client->etdev->vcid_pool |= BIT(group->vcid);
 			list_del(&l->list);
 			edgetpu_device_group_put(l->grp);
 			kfree(l);
@@ -1236,8 +1268,13 @@ alloc_mapping_from_useraddr(struct edgetpu_device_group *group, u64 host_addr,
 	return hmap;
 
 error_free_sgt:
-	while (i > 0) {
-		i--;
+	/*
+	 * Starting from kernel version 5.10, the caller must call sg_free_table
+	 * to clean up any leftover allocations if sg_alloc_table_from_pages
+	 * returns non-0 for failures. Calling sg_free_table is also fine with
+	 * older kernel versions since sg_free_table handles this properly.
+	 */
+	for (; i >= 0; i--) {
 		if (i == 0)
 			sgt = &hmap->map.sgt;
 		else
@@ -1456,8 +1493,8 @@ int edgetpu_device_group_unmap(struct edgetpu_device_group *group,
 	int ret = 0;
 
 	mutex_lock(&group->lock);
-	if (!edgetpu_device_group_is_finalized(group)) {
-		ret = edgetpu_group_errno(group);
+	if (!is_finalized_or_errored(group)) {
+		ret = -EINVAL;
 		goto unlock_group;
 	}
 
@@ -1639,17 +1676,74 @@ out:
 	return ret;
 }
 
-void edgetpu_fatal_error_notify(struct edgetpu_dev *etdev)
+/*
+ * Set @group status as errored, set the error mask, and notify the runtime of
+ * the fatal error event on the group.
+ */
+void edgetpu_group_fatal_error_notify(struct edgetpu_device_group *group,
+				      uint error_mask)
 {
-	struct edgetpu_list_group *l;
+	etdev_dbg(group->etdev, "notify group %u error 0x%x",
+		  group->workload_id, error_mask);
+	mutex_lock(&group->lock);
+	/*
+	 * Only finalized groups may have handshake with the FW, mark
+	 * them as errored.
+	 */
+	if (edgetpu_device_group_is_finalized(group))
+		group->status = EDGETPU_DEVICE_GROUP_ERRORED;
+	group->fatal_errors |= error_mask;
+	mutex_unlock(&group->lock);
+	edgetpu_group_notify(group, EDGETPU_EVENT_FATAL_ERROR);
+}
+
+/*
+ * For each group active on @etdev: set the group status as errored, set the
+ * error mask, and notify the runtime of the fatal error event.
+ */
+void edgetpu_fatal_error_notify(struct edgetpu_dev *etdev, uint error_mask)
+{
+	size_t i, num_groups = 0;
 	struct edgetpu_device_group *group;
+	struct edgetpu_device_group **groups;
+	struct edgetpu_list_group *g;
 
 	mutex_lock(&etdev->groups_lock);
-
-	etdev_for_each_group(etdev, l, group)
-		edgetpu_group_notify(group, EDGETPU_EVENT_FATAL_ERROR);
-
+	groups = kmalloc_array(etdev->n_groups, sizeof(*groups), GFP_KERNEL);
+	if (unlikely(!groups)) {
+		/*
+		 * Just give up setting status in this case, this only happens
+		 * when the system is OOM.
+		 */
+		mutex_unlock(&etdev->groups_lock);
+		return;
+	}
+	/*
+	 * Fetch the groups into an array to set the group status without
+	 * holding @etdev->groups_lock. To prevent the potential deadlock that
+	 * edgetpu_device_group_add() holds group->lock then etdev->groups_lock.
+	 */
+	etdev_for_each_group(etdev, g, group) {
+		if (edgetpu_device_group_is_disbanded(group))
+			continue;
+		groups[num_groups++] = edgetpu_device_group_get(group);
+	}
 	mutex_unlock(&etdev->groups_lock);
+	for (i = 0; i < num_groups; i++) {
+		edgetpu_group_fatal_error_notify(groups[i], error_mask);
+		edgetpu_device_group_put(groups[i]);
+	}
+	kfree(groups);
+}
+
+uint edgetpu_group_get_fatal_errors(struct edgetpu_device_group *group)
+{
+	uint fatal_errors;
+
+	mutex_lock(&group->lock);
+	fatal_errors = group->fatal_errors;
+	mutex_unlock(&group->lock);
+	return fatal_errors;
 }
 
 void edgetpu_group_detach_mailbox_locked(struct edgetpu_device_group *group)
@@ -1670,7 +1764,7 @@ void edgetpu_group_close_and_detach_mailbox(struct edgetpu_device_group *group)
 	 * Detaching mailbox for an errored group is also fine.
 	 */
 	if (is_finalized_or_errored(group)) {
-		edgetpu_group_kci_close_device(group);
+		edgetpu_group_deactivate(group);
 		edgetpu_group_detach_mailbox_locked(group);
 	}
 	mutex_unlock(&group->lock);
@@ -1694,11 +1788,54 @@ int edgetpu_group_attach_and_open_mailbox(struct edgetpu_device_group *group)
 	 * Only attaching mailbox for finalized groups.
 	 * Don't attach mailbox for errored groups.
 	 */
-	if (edgetpu_device_group_is_finalized(group)) {
-		ret = edgetpu_group_attach_mailbox_locked(group);
-		if (!ret)
-			ret = edgetpu_group_kci_open_device(group);
-	}
+	if (!edgetpu_device_group_is_finalized(group))
+		goto out_unlock;
+	ret = edgetpu_group_attach_mailbox_locked(group);
+	if (ret)
+		goto out_unlock;
+	ret = edgetpu_group_activate(group);
+	if (ret)
+		edgetpu_group_detach_mailbox_locked(group);
+
+out_unlock:
 	mutex_unlock(&group->lock);
 	return ret;
+}
+
+/*
+ * Return the group with id @vcid for device @etdev, with a reference held
+ * on the group (must call edgetpu_device_group_put when done), or NULL if
+ * no group with that VCID is found.
+ */
+static struct edgetpu_device_group *get_group_by_vcid(
+	struct edgetpu_dev *etdev, u16 vcid)
+{
+	struct edgetpu_device_group *group = NULL;
+	struct edgetpu_device_group *tgroup;
+	struct edgetpu_list_group *g;
+
+	mutex_lock(&etdev->groups_lock);
+	etdev_for_each_group(etdev, g, tgroup) {
+		if (tgroup->vcid == vcid) {
+			group = edgetpu_device_group_get(tgroup);
+			break;
+		}
+	}
+	mutex_unlock(&etdev->groups_lock);
+	return group;
+}
+
+void edgetpu_handle_job_lockup(struct edgetpu_dev *etdev, u16 vcid)
+{
+	struct edgetpu_device_group *group;
+
+	etdev_err(etdev, "firmware-detected job lockup on VCID %u",
+		  vcid);
+	group = get_group_by_vcid(etdev, vcid);
+	if (!group) {
+		etdev_warn(etdev, "VCID %u group not found", vcid);
+		return;
+	}
+	edgetpu_group_fatal_error_notify(group, EDGETPU_ERROR_RUNTIME_TIMEOUT);
+	edgetpu_device_group_put(group);
 }

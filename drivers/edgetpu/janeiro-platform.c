@@ -24,11 +24,12 @@
 #include "mobile-firmware.h"
 
 static const struct of_device_id edgetpu_of_match[] = {
-	{
-		.compatible = "google,darwinn",
-	},
+	/* TODO(b/190677977): remove  */
+	{ .compatible = "google,darwinn", },
+	{ .compatible = "google,edgetpu-gs201", },
 	{ /* end of list */ },
 };
+
 MODULE_DEVICE_TABLE(of, edgetpu_of_match);
 
 #define EDGETPU_POOL_MEM_OFFSET (EDGETPU_TELEMETRY_BUFFER_SIZE * 2)

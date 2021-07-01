@@ -6,6 +6,7 @@
  */
 
 #include <linux/irqreturn.h>
+#include <linux/uaccess.h>
 
 #include "edgetpu-config.h"
 #include "edgetpu-internal.h"
@@ -109,18 +110,29 @@ void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
 	}
 }
 
-
-/* TODO: This would be a good place to handle AoC/DSP mailboxes */
-
 int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
-				     struct edgetpu_ext_mailbox *ext_mbox)
+				     struct edgetpu_ext_mailbox_ioctl *args)
 {
+	struct edgetpu_external_mailbox_req req;
+
+	if (args->type == EDGETPU_EXT_MAILBOX_TYPE_DSP) {
+		if (!args->count || args->count > EDGETPU_NUM_EXT_MAILBOXES)
+			return -EINVAL;
+		if (copy_from_user(&req.attr, (void __user *)args->attrs, sizeof(req.attr)))
+			return -EFAULT;
+		req.count = args->count;
+		req.start = JANEIRO_EXT_DSP_MAILBOX_START;
+		req.end = JANEIRO_EXT_DSP_MAILBOX_END;
+		return edgetpu_mailbox_enable_ext(client, -1, &req);
+	}
 	return -ENODEV;
 }
 
 int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
-				     struct edgetpu_ext_mailbox *ext_mbox)
+				     struct edgetpu_ext_mailbox_ioctl *args)
 {
+	if (args->type == EDGETPU_EXT_MAILBOX_TYPE_DSP)
+		return edgetpu_mailbox_disable_ext(client, -1);
 	return -ENODEV;
 }
 

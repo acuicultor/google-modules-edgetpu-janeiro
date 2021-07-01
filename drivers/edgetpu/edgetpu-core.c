@@ -323,6 +323,7 @@ static struct edgetpu_mailbox_manager_desc mailbox_manager_desc = {
 	.num_mailbox = EDGETPU_NUM_MAILBOXES,
 	.num_vii_mailbox = EDGETPU_NUM_VII_MAILBOXES,
 	.num_p2p_mailbox = EDGETPU_NUM_P2P_MAILBOXES,
+	.num_ext_mailbox = EDGETPU_NUM_EXT_MAILBOXES,
 	.get_context_csr_base = edgetpu_mailbox_get_context_csr_base,
 	.get_cmd_queue_csr_base = edgetpu_mailbox_get_cmd_queue_csr_base,
 	.get_resp_queue_csr_base = edgetpu_mailbox_get_resp_queue_csr_base,
@@ -370,6 +371,7 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	INIT_LIST_HEAD(&etdev->groups);
 	etdev->n_groups = 0;
 	etdev->group_join_lockout = false;
+	etdev->vcid_pool = (1u << EDGETPU_NUM_VCIDS) - 1;
 	mutex_init(&etdev->state_lock);
 	etdev->state = ETDEV_STATE_NOFW;
 
@@ -582,11 +584,12 @@ void edgetpu_handle_firmware_crash(struct edgetpu_dev *etdev,
 	if (crash_type == EDGETPU_FW_CRASH_UNRECOV_FAULT) {
 		etdev_err(etdev, "firmware unrecoverable crash");
 		etdev->firmware_crash_count++;
-		edgetpu_fatal_error_notify(etdev);
+		edgetpu_fatal_error_notify(etdev, EDGETPU_ERROR_FW_CRASH);
 		/* Restart firmware without chip reset */
 		edgetpu_watchdog_bite(etdev, false);
 	} else {
-		etdev_err(etdev, "firmware crash event: %u", crash_type);
+		etdev_err(etdev, "firmware non-fatal crash event: %u",
+			  crash_type);
 	}
 }
 

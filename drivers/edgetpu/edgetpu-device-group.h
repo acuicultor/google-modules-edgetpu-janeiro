@@ -85,6 +85,8 @@ struct edgetpu_device_group {
 	 * leader of this group.
 	 */
 	bool dev_inaccessible;
+	/* Virtual context ID to be sent to the firmware. */
+	u16 vcid;
 
 	/* protects everything in the following comment block */
 	struct mutex lock;
@@ -104,6 +106,7 @@ struct edgetpu_device_group {
 	 */
 	struct edgetpu_client **members;
 	enum edgetpu_device_group_status status;
+	bool activated; /* whether this group's VII has ever been activated */
 	struct edgetpu_vii vii;		/* VII mailbox */
 	/*
 	 * Context ID ranges from EDGETPU_CONTEXT_VII_BASE to
@@ -117,6 +120,14 @@ struct edgetpu_device_group {
 	struct edgetpu_iommu_domain *etdomain;
 	/* matrix of P2P mailboxes */
 	struct edgetpu_p2p_mailbox **p2p_mailbox_matrix;
+	/*
+	 * External mailboxes associated with this group, only valid if
+	 * external mailbox allocated and enabled.
+	 */
+	struct edgetpu_external_mailbox *ext_mailbox;
+
+	/* Mask of errors set for this group. */
+	uint fatal_errors;
 
 	/* end of fields protected by @lock */
 
@@ -372,8 +383,14 @@ bool edgetpu_in_any_group(struct edgetpu_dev *etdev);
  */
 bool edgetpu_set_group_join_lockout(struct edgetpu_dev *etdev, bool lockout);
 
+/* Notify @group about a fatal error for that group. */
+void edgetpu_group_fatal_error_notify(struct edgetpu_device_group *group,
+				      uint error_mask);
 /* Notify all device groups of @etdev about a failure on the die */
-void edgetpu_fatal_error_notify(struct edgetpu_dev *etdev);
+void edgetpu_fatal_error_notify(struct edgetpu_dev *etdev, uint error_mask);
+
+/* Return fatal error signaled bitmask for device group */
+uint edgetpu_group_get_fatal_errors(struct edgetpu_device_group *group);
 
 /*
  * Detach and release the mailbox resources of VII from @group.

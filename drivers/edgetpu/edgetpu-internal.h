@@ -167,10 +167,16 @@ struct edgetpu_dev {
 	struct dentry *d_entry;    /* debugfs dir for this device */
 	struct mutex state_lock;   /* protects state of this device */
 	enum edgetpu_dev_state state;
-	struct mutex groups_lock;  /* protects groups, n_groups, and lockout */
+	struct mutex groups_lock;
+	/* fields protected by @groups_lock */
+
 	struct list_head groups;
 	uint n_groups;		   /* number of entries in @groups */
 	bool group_join_lockout;   /* disable group join while reinit */
+	u32 vcid_pool;		   /* bitmask of VCID to be allocated */
+
+	/* end of fields protected by @groups_lock */
+
 	void *mmu_cookie;	   /* mmu driver private data */
 	void *dram_cookie;	   /* on-device DRAM private data */
 	struct edgetpu_mailbox_manager *mailbox_manager;
@@ -333,6 +339,9 @@ static inline bool edgetpu_is_external_wrapper_class_file(struct file *file)
 void edgetpu_handle_firmware_crash(struct edgetpu_dev *etdev,
 				   enum edgetpu_fw_crash_type crash_type);
 
+/* Handle notification of job lockup from firmware */
+void edgetpu_handle_job_lockup(struct edgetpu_dev *etdev, u16 vcid);
+
 /* Bus (Platform/PCI) <-> Core API */
 
 int __init edgetpu_init(void);
@@ -424,10 +433,10 @@ int edgetpu_get_state_errno_locked(struct edgetpu_dev *etdev);
 
 /* Chip-specific code to acquire external mailboxes */
 int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
-				     struct edgetpu_ext_mailbox *ext_mbox);
+				     struct edgetpu_ext_mailbox_ioctl *args);
 
 /* Chip-specific code to release external mailboxes */
 int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
-				     struct edgetpu_ext_mailbox *ext_mbox);
+				     struct edgetpu_ext_mailbox_ioctl *args);
 
 #endif /* __EDGETPU_INTERNAL_H__ */

@@ -13,6 +13,10 @@
 #define EDGETPU_DEV_MAX		1
 
 #define EDGETPU_HAS_MULTI_GROUPS
+/* Max number of virtual context IDs that can be allocated for one device. */
+#define EDGETPU_NUM_VCIDS 16
+/* Reserved VCID that uses the extra partition. */
+#define EDGETPU_VCID_EXTRA_PARTITION 0
 
 #define EDGETPU_HAS_WAKELOCK
 
