@@ -10,6 +10,7 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <soc/google/bcl.h>
 #include <linux/version.h>
 
 #include "edgetpu-config.h"
@@ -233,6 +234,7 @@ static int janeiro_set_lpm(struct edgetpu_dev *etdev)
 static int janeiro_power_up(struct edgetpu_pm *etpm)
 {
 	struct edgetpu_dev *etdev = etpm->etdev;
+	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
 	int ret = 0;
 
 	ret = janeiro_pwr_state_set(
@@ -291,8 +293,16 @@ static int janeiro_power_up(struct edgetpu_pm *etpm)
 		break;
 	}
 
-	if (ret)
+	if (ret) {
 		janeiro_power_down(etpm);
+	} else {
+#if IS_ENABLED(CONFIG_GOOGLE_BCL)
+		if (!edgetpu_pdev->bcl_dev)
+			edgetpu_pdev->bcl_dev = google_retrieve_bcl_handle();
+		if (edgetpu_pdev->bcl_dev)
+			google_init_tpu_ratio(edgetpu_pdev->bcl_dev);
+#endif
+	}
 
 	return ret;
 }

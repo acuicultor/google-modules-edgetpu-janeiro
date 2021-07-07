@@ -11,6 +11,7 @@
 #include <linux/io.h>
 #include <linux/mutex.h>
 #include <linux/types.h>
+#include <soc/google/bcl.h>
 
 #include "edgetpu-internal.h"
 #include "janeiro-pm.h"
@@ -42,6 +43,9 @@ struct janeiro_platform_dev {
 	void __iomem *ssmt_base;
 	struct edgetpu_coherent_mem log_mem;
 	struct edgetpu_coherent_mem trace_mem;
+#if IS_ENABLED(CONFIG_GOOGLE_BCL)
+	struct bcl_device *bcl_dev;
+#endif
 };
 
 #endif /* __JANEIRO_PLATFORM_H__ */
