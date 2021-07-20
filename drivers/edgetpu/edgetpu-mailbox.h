@@ -487,7 +487,12 @@ static inline void edgetpu_mailbox_enable(struct edgetpu_mailbox *mailbox)
 /* Disables a mailbox by setting CSR. */
 static inline void edgetpu_mailbox_disable(struct edgetpu_mailbox *mailbox)
 {
-	EDGETPU_MAILBOX_CONTEXT_WRITE(mailbox, context_enable, 0);
+	/*
+	 * if device is being removed, no need to access device CSR since it
+	 * is going to be powered-off anyway
+	 */
+	if (!mailbox->etdev->on_exit)
+		EDGETPU_MAILBOX_CONTEXT_WRITE(mailbox, context_enable, 0);
 }
 
 #endif /* __EDGETPU_MAILBOX_H__ */

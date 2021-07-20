@@ -14,7 +14,6 @@
 #include <soc/google/bcl.h>
 
 #include "edgetpu-internal.h"
-#include "janeiro-pm.h"
 
 #define to_janeiro_dev(etdev)                                                  \
 	container_of(etdev, struct janeiro_platform_dev, edgetpu_dev)

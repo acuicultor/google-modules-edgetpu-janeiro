@@ -35,29 +35,27 @@
 #include "edgetpu-thermal.h"
 #include "edgetpu-usage-stats.h"
 
-#define etdev_err(etdev, fmt, ...) dev_err((etdev)->etcdev, fmt, ##__VA_ARGS__)
+#define get_dev_for_logging(etdev) ((etdev)->etcdev ? (etdev)->etcdev : (etdev)->dev)
+
+#define etdev_err(etdev, fmt, ...) dev_err(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_warn(etdev, fmt, ...)                                            \
-	dev_warn((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_warn(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_info(etdev, fmt, ...)                                            \
-	dev_info((etdev)->etcdev, fmt, ##__VA_ARGS__)
-#define etdev_dbg(etdev, fmt, ...) dev_dbg((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_info(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
+#define etdev_dbg(etdev, fmt, ...) dev_dbg(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_err_ratelimited(etdev, fmt, ...)                                 \
-	dev_err_ratelimited((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_err_ratelimited(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_warn_ratelimited(etdev, fmt, ...)                                \
-	dev_warn_ratelimited((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_warn_ratelimited(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_info_ratelimited(etdev, fmt, ...)                                \
-	dev_info_ratelimited((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_info_ratelimited(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_dbg_ratelimited(etdev, fmt, ...)                                 \
-	dev_dbg_ratelimited((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_dbg_ratelimited(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_warn_once(etdev, fmt, ...)                                       \
-	dev_warn_once((etdev)->etcdev, fmt, ##__VA_ARGS__)
+	dev_warn_once(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 
 /* The number of TPU tiles in an edgetpu chip */
-#ifdef CONFIG_EDGETPU_FPGA
-#define EDGETPU_NTILES	4
-#else
 #define EDGETPU_NTILES	16
-#endif
 
 /* Up to 7 concurrent device groups / workloads per device. */
 #define EDGETPU_NGROUPS		7
@@ -129,6 +127,16 @@ struct edgetpu_client {
 	u64 perdie_events;
 };
 
+/* edgetpu_dev#clients list entry. */
+struct edgetpu_list_device_client {
+	struct list_head list;
+	struct edgetpu_client *client;
+};
+
+/* Macro to loop through etdev->clients (hold clients_lock prior). */
+#define for_each_list_device_client(etdev, c)                                  \
+	list_for_each_entry(c, &etdev->clients, list)
+
 struct edgetpu_mapping;
 struct edgetpu_mailbox_manager;
 struct edgetpu_kci;
@@ -177,6 +185,8 @@ struct edgetpu_dev {
 
 	/* end of fields protected by @groups_lock */
 
+	struct mutex clients_lock; /* protects clients */
+	struct list_head clients;
 	void *mmu_cookie;	   /* mmu driver private data */
 	void *dram_cookie;	   /* on-device DRAM private data */
 	struct edgetpu_mailbox_manager *mailbox_manager;
@@ -205,6 +215,8 @@ struct edgetpu_dev {
 	/* debug dump handlers */
 	edgetpu_debug_dump_handlers *debug_dump_handlers;
 	struct work_struct debug_dump_work;
+	/* status about if device going to be removed from system */
+	bool on_exit;
 };
 
 /* Firmware crash_type codes */

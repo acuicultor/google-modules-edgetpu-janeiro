@@ -24,7 +24,7 @@
 #include "edgetpu.h"
 
 /* entry of edgetpu_device_group#clients */
-struct edgetpu_list_client {
+struct edgetpu_list_group_client {
 	struct list_head list;
 	struct edgetpu_client *client;
 };

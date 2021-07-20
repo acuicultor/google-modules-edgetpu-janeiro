@@ -32,7 +32,7 @@ struct edgetpu_shared_fw_init_data {
 };
 
 /* Initializes structures for shared firmware management. */
-int
+void
 edgetpu_shared_fw_init(const struct edgetpu_shared_fw_init_data *init_data);
 /* Finalizes structures for shared firmware management. */
 void edgetpu_shared_fw_exit(void);
@@ -71,11 +71,4 @@ edgetpu_shared_fw_get_by_name(const char *name);
  * reference count reaches 0.
  */
 void edgetpu_shared_fw_put(struct edgetpu_shared_fw_buffer *buffer);
-
-/*
- * (Add/Remove) driver-wide sysfs attributes for development and debug.
- */
-int edgetpu_shared_fw_add_driver_attrs(struct device_driver *driver);
-void edgetpu_shared_fw_remove_driver_attrs(struct device_driver *driver);
-
 #endif /* __EDGETPU_SHARED_FW_H__ */

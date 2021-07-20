@@ -8,6 +8,7 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
+#include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -244,7 +245,7 @@ static void telemetry_mappings_show(struct edgetpu_telemetry *tel,
 
 	seq_printf(s, "  0x%llx %lu %s 0x%llx %pad\n",
 		   tel->coherent_mem.tpu_addr,
-		   tel->coherent_mem.size / PAGE_SIZE, tel->name,
+		   DIV_ROUND_UP(tel->coherent_mem.size, PAGE_SIZE), tel->name,
 		   tel->coherent_mem.host_addr, &tel->coherent_mem.dma_addr);
 }
 

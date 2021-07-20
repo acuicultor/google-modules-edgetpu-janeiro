@@ -10,14 +10,15 @@
 #include <linux/circ_buf.h>
 #include <linux/device.h>
 #include <linux/errno.h>
+#include <linux/kernel.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/string.h> /* memcpy */
 
 #include "edgetpu-firmware.h"
 #include "edgetpu-internal.h"
-#include "edgetpu-kci.h"
 #include "edgetpu-iremap-pool.h"
+#include "edgetpu-kci.h"
 #include "edgetpu-mmu.h"
 #include "edgetpu-telemetry.h"
 #include "edgetpu-usage-stats.h"
@@ -29,16 +30,21 @@
 #define QUEUE_SIZE MAX_QUEUE_SIZE
 
 /* Timeout for KCI responses from the firmware (milliseconds) */
-#if IS_ENABLED(CONFIG_EDGETPU_FPGA)
-/* Set extra ludicrously high to 60 seconds for (slow) Palladium emulation. */
-#define KCI_TIMEOUT	(60000)
-#elif IS_ENABLED(CONFIG_EDGETPU_TEST)
+#if IS_ENABLED(CONFIG_EDGETPU_TEST)
 /* fake-firmware could respond in a short time */
 #define KCI_TIMEOUT	(200)
 #else
 /* 5 secs. */
 #define KCI_TIMEOUT	(5000)
 #endif
+
+/* A macro for KCIs to leave early when the device state is known to be bad. */
+#define RETURN_ERRNO_IF_ETDEV_NOT_GOOD(kci)                                                        \
+	do {                                                                                       \
+		int ret = edgetpu_get_state_errno_locked(kci->mailbox->etdev);                     \
+		if (ret)                                                                           \
+			return ret;                                                                \
+	} while (0)
 
 static inline u32 edgetpu_kci_queue_element_size(enum mailbox_queue_type type)
 {
@@ -781,6 +787,7 @@ int edgetpu_kci_join_group(struct edgetpu_kci *kci, u8 n_dies, u8 vid)
 
 	if (!kci)
 		return -ENODEV;
+	RETURN_ERRNO_IF_ETDEV_NOT_GOOD(kci);
 	return edgetpu_kci_send_cmd_with_data(kci, &cmd, &detail, sizeof(detail));
 }
 
@@ -792,6 +799,7 @@ int edgetpu_kci_leave_group(struct edgetpu_kci *kci)
 
 	if (!kci)
 		return -ENODEV;
+	RETURN_ERRNO_IF_ETDEV_NOT_GOOD(kci);
 	return edgetpu_kci_send_cmd(kci, &cmd);
 }
 
@@ -946,14 +954,18 @@ void edgetpu_kci_mappings_show(struct edgetpu_dev *etdev, struct seq_file *s)
 	seq_printf(s, "kci context %u:\n", EDGETPU_CONTEXT_KCI);
 	seq_printf(s, "  0x%llx %lu cmdq - %pad\n",
 		   kci->cmd_queue_mem.tpu_addr,
-		   QUEUE_SIZE *
-		   edgetpu_kci_queue_element_size(MAILBOX_CMD_QUEUE)
-		   / PAGE_SIZE, &kci->cmd_queue_mem.dma_addr);
+		   DIV_ROUND_UP(
+			QUEUE_SIZE *
+			edgetpu_kci_queue_element_size(MAILBOX_CMD_QUEUE),
+			PAGE_SIZE),
+		   &kci->cmd_queue_mem.dma_addr);
 	seq_printf(s, "  0x%llx %lu rspq - %pad\n",
 		   kci->resp_queue_mem.tpu_addr,
-		   QUEUE_SIZE *
-		   edgetpu_kci_queue_element_size(MAILBOX_RESP_QUEUE)
-		   / PAGE_SIZE, &kci->resp_queue_mem.dma_addr);
+		   DIV_ROUND_UP(
+			QUEUE_SIZE *
+			edgetpu_kci_queue_element_size(MAILBOX_RESP_QUEUE),
+			PAGE_SIZE),
+		   &kci->resp_queue_mem.dma_addr);
 	edgetpu_telemetry_mappings_show(etdev, s);
 	edgetpu_firmware_mappings_show(etdev, s);
 }
@@ -1001,6 +1013,7 @@ int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_id, s16 vcid, b
 
 	if (!kci)
 		return -ENODEV;
+	RETURN_ERRNO_IF_ETDEV_NOT_GOOD(kci);
 	if (vcid < 0)
 		return edgetpu_kci_send_cmd(kci, &cmd);
 	return edgetpu_kci_send_cmd_with_data(kci, &cmd, &detail, sizeof(detail));
@@ -1017,6 +1030,7 @@ int edgetpu_kci_close_device(struct edgetpu_kci *kci, u32 mailbox_id)
 
 	if (!kci)
 		return -ENODEV;
+	RETURN_ERRNO_IF_ETDEV_NOT_GOOD(kci);
 	return edgetpu_kci_send_cmd(kci, &cmd);
 }
 
@@ -1032,11 +1046,8 @@ int edgetpu_kci_notify_throttling(struct edgetpu_dev *etdev, u32 level)
 
 	if (!etdev->kci)
 		return -ENODEV;
-	if (!edgetpu_pm_get_if_powered(etdev->pm))
-		return -EAGAIN;
 
 	ret =  edgetpu_kci_send_cmd(etdev->kci, &cmd);
-	edgetpu_pm_put(etdev->pm);
 	return ret;
 }
 

@@ -40,6 +40,8 @@ typedef __u32 edgetpu_map_flag_t;
 /* Offset and mask to set the PBHA bits of IOMMU mappings */
 #define EDGETPU_MAP_ATTR_PBHA_SHIFT	5
 #define EDGETPU_MAP_ATTR_PBHA_MASK	0xf
+/* Create coherent mapping of the buffer */
+#define EDGETPU_MAP_COHERENT		(1u << 9)
 
 /* External mailbox types */
 #define EDGETPU_EXT_MAILBOX_TYPE_TZ		1
@@ -78,7 +80,12 @@ struct edgetpu_map_ioctl {
 	 *               1 = Skip CPU sync.
 	 *             Note: This bit is ignored on the map call.
 	 *   [8:5]   - Value of PBHA bits for IOMMU mappings. For Abrolhos only.
-	 *   [31:9]  - RESERVED
+	 *   [9:9]   - Coherent Mapping:
+	 *              0 = Create non-coherent mappings of the buffer.
+	 *              1 = Create coherent mappings of the buffer.
+	 *             Note: this attribute may be ignored on platforms where
+	 *             the TPU is not I/O coherent.
+	 *   [31:10]  - RESERVED
 	 */
 	edgetpu_map_flag_t flags;
 	/*

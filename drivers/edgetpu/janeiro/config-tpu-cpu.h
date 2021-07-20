@@ -16,7 +16,8 @@
 #define EDGETPU_REG_INSTRUCTION_REMAP_NEW_BASE          0x190068
 #define EDGETPU_REG_INSTRUCTION_REMAP_SECURITY          0x190070
 #define EDGETPU_REG_SECURITY                            0x190048
-#define EDGETPU_REG_POWER_CONTROL			0x1A0008
+#define EDGETPU_REG_POWER_CONTROL                       0x1A0008
+#define EDGETPU_REG_LPM_CONTROL                         0x1D0000
 #define PSTATE_SHIFT					1
 #define PSTATE						(1 << PSTATE_SHIFT)
 #define PREQ						(1 << 2)

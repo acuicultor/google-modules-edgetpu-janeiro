@@ -320,11 +320,11 @@ int edgetpu_mmu_reattach(struct edgetpu_dev *etdev)
 static int get_iommu_map_params(struct edgetpu_dev *etdev,
 				struct edgetpu_mapping *map,
 				enum edgetpu_context_id context_id,
-				struct edgetpu_iommu_map_params *params)
+				struct edgetpu_iommu_map_params *params, u32 mmu_flags)
 {
 	struct edgetpu_iommu *etiommu = etdev->mmu_cookie;
 	size_t size = 0;
-	int prot = __dma_dir_to_iommu_prot(map->dir, etdev->dev);
+	int prot = mmu_flag_to_iommu_prot(mmu_flags, etdev->dev, map->dir);
 	struct iommu_domain *domain;
 	int i;
 	struct scatterlist *sg;
@@ -357,7 +357,7 @@ int edgetpu_mmu_map(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 	struct iommu_domain *default_domain =
 		iommu_get_domain_for_dev(etdev->dev);
 
-	ret = get_iommu_map_params(etdev, map, context_id, &params);
+	ret = get_iommu_map_params(etdev, map, context_id, &params, mmu_flags);
 
 	if (ret)
 		return ret;
@@ -367,8 +367,7 @@ int edgetpu_mmu_map(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 			      "%s: 64-bit addressing is not supported",
 			      __func__);
 
-	ret = dma_map_sg_attrs(etdev->dev, map->sgt.sgl, map->sgt.nents,
-			       edgetpu_host_dma_dir(map->dir), map->dma_attrs);
+	ret = dma_map_sg_attrs(etdev->dev, map->sgt.sgl, map->sgt.nents, map->dir, map->dma_attrs);
 	if (!ret)
 		return -EINVAL;
 	map->sgt.nents = ret;
@@ -383,9 +382,7 @@ int edgetpu_mmu_map(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 		if (!iommu_map_sg(params.domain, iova, map->sgt.sgl,
 				  map->sgt.orig_nents, params.prot)) {
 			/* Undo the mapping in the default domain */
-			dma_unmap_sg_attrs(etdev->dev, map->sgt.sgl,
-					   map->sgt.orig_nents,
-					   edgetpu_host_dma_dir(map->dir),
+			dma_unmap_sg_attrs(etdev->dev, map->sgt.sgl, map->sgt.orig_nents, map->dir,
 					   DMA_ATTR_SKIP_CPU_SYNC);
 			return -ENOMEM;
 		}
@@ -403,7 +400,7 @@ void edgetpu_mmu_unmap(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 	struct iommu_domain *default_domain =
 		iommu_get_domain_for_dev(etdev->dev);
 
-	ret = get_iommu_map_params(etdev, map, context_id, &params);
+	ret = get_iommu_map_params(etdev, map, context_id, &params, 0);
 	if (!ret && params.domain != default_domain) {
 		/*
 		 * If this is a per-context mapping, it was mirrored in the
@@ -413,15 +410,15 @@ void edgetpu_mmu_unmap(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 	}
 
 	/* Undo the mapping in the default domain */
-	dma_unmap_sg_attrs(etdev->dev, map->sgt.sgl, map->sgt.orig_nents,
-			   edgetpu_host_dma_dir(map->dir), map->dma_attrs);
+	dma_unmap_sg_attrs(etdev->dev, map->sgt.sgl, map->sgt.orig_nents, map->dir, map->dma_attrs);
 }
 
 int edgetpu_mmu_map_iova_sgt(struct edgetpu_dev *etdev, tpu_addr_t iova,
 			     struct sg_table *sgt, enum dma_data_direction dir,
+			     u32 mmu_flags,
 			     enum edgetpu_context_id context_id)
 {
-	const int prot = __dma_dir_to_iommu_prot(edgetpu_host_dma_dir(dir), etdev->dev);
+	const int prot = mmu_flag_to_iommu_prot(mmu_flags, etdev->dev, dir);
 	const tpu_addr_t orig_iova = iova;
 	struct scatterlist *sg;
 	int i;
@@ -510,7 +507,7 @@ tpu_addr_t edgetpu_mmu_tpu_map(struct edgetpu_dev *etdev, dma_addr_t down_addr,
 	struct iommu_domain *default_domain =
 		iommu_get_domain_for_dev(etdev->dev);
 	phys_addr_t paddr;
-	int prot = __dma_dir_to_iommu_prot(dir, etdev->dev);
+	int prot = mmu_flag_to_iommu_prot(mmu_flags, etdev->dev, dir);
 
 	domain = get_domain_by_context_id(etdev, context_id);
 	/*
@@ -551,8 +548,7 @@ void edgetpu_mmu_tpu_unmap(struct edgetpu_dev *etdev, tpu_addr_t tpu_addr,
 }
 
 tpu_addr_t edgetpu_mmu_tpu_map_sgt(struct edgetpu_dev *etdev,
-				   struct sg_table *sgt,
-				   enum dma_data_direction dir,
+				   struct sg_table *sgt, enum dma_data_direction dir,
 				   enum edgetpu_context_id context_id,
 				   u32 mmu_flags)
 {
@@ -562,7 +558,7 @@ tpu_addr_t edgetpu_mmu_tpu_map_sgt(struct edgetpu_dev *etdev,
 	phys_addr_t paddr;
 	dma_addr_t iova, cur_iova;
 	size_t size;
-	int prot = __dma_dir_to_iommu_prot(dir, etdev->dev);
+	int prot = mmu_flag_to_iommu_prot(mmu_flags, etdev->dev, dir);
 	struct scatterlist *sg;
 	int ret;
 	int i;

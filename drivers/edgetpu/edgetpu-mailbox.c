@@ -18,6 +18,7 @@
 #include "edgetpu-kci.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-mmu.h"
+#include "edgetpu-sw-watchdog.h"
 #include "edgetpu-wakelock.h"
 #include "edgetpu.h"
 
@@ -506,10 +507,6 @@ int edgetpu_mailbox_alloc_queue(struct edgetpu_dev *etdev,
 	u32 size = unit * queue_size;
 	int ret;
 
-	/* checks integer overflow */
-	if (queue_size > SIZE_MAX / unit)
-		return -ENOMEM;
-
 	/* Align queue size to page size for TPU MMU map. */
 	size = __ALIGN_KERNEL(size, PAGE_SIZE);
 	ret = edgetpu_iremap_alloc(etdev, size, mem,
@@ -992,7 +989,7 @@ static int edgetpu_mailbox_external_alloc_enable(struct edgetpu_client *client,
 	for (i = 0; i < ext_mailbox->count; i++) {
 		id = ext_mailbox->descriptors[i].mailbox->mailbox_id;
 		etdev_dbg(group->etdev, "Enabling mailbox: %d\n", id);
-		ret = edgetpu_mailbox_activate(group->etdev, id, vcid, false);
+		ret = edgetpu_mailbox_activate(group->etdev, id, vcid, true);
 		if (ret) {
 			etdev_err(group->etdev, "Activate mailbox %d failed: %d", id, ret);
 			break;
@@ -1132,6 +1129,13 @@ int edgetpu_mailbox_activate(struct edgetpu_dev *etdev, u32 mailbox_id, s16 vcid
 		eh->fw_state |= bit;
 	}
 	mutex_unlock(&eh->lock);
+	/*
+	 * We are observing OPEN_DEVICE KCI fails while other KCIs (usage update / shutdown) still
+	 * succeed and no firmware crash is reported. Kick off the firmware restart when we are
+	 * facing this and hope this can rescue the device from the bad state.
+	 */
+	if (ret == -ETIMEDOUT)
+		edgetpu_watchdog_bite(etdev, false);
 	return ret;
 }
 

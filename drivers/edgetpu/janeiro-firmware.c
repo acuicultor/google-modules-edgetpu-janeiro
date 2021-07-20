@@ -79,7 +79,8 @@ static void janeiro_firmware_before_destroy(struct edgetpu_firmware *et_fw)
 	u32 i, tpu_addr, size;
 	struct edgetpu_dev *etdev = et_fw->etdev;
 
-	tpu_cpu_reset(et_fw->etdev, 1);
+	if (!etdev->on_exit)
+		tpu_cpu_reset(et_fw->etdev, 1);
 	/* TODO(b/189906347): Remove when GSA/TZ support is available. */
 	/* Remove mappings created by setup_buffer() */
 	data = edgetpu_firmware_get_data(et_fw);
@@ -247,7 +248,8 @@ static int janeiro_firmware_prepare_run(struct edgetpu_firmware *et_fw,
 	return ret;
 }
 
-static const struct edgetpu_firmware_handlers janeiro_firmware_handlers = {
+static const struct edgetpu_firmware_chip_data janeiro_firmware_chip_data = {
+	.default_firmware_name = EDGETPU_DEFAULT_FIRMWARE_NAME,
 	.after_create = janeiro_firmware_after_create,
 	.before_destroy = janeiro_firmware_before_destroy,
 	.alloc_buffer = janeiro_firmware_alloc_buffer,
@@ -259,18 +261,12 @@ static const struct edgetpu_firmware_handlers janeiro_firmware_handlers = {
 
 int mobile_edgetpu_firmware_create(struct edgetpu_dev *etdev)
 {
-	return edgetpu_firmware_create(etdev, &janeiro_firmware_handlers);
+	return edgetpu_firmware_create(etdev, &janeiro_firmware_chip_data);
 }
 
 void mobile_edgetpu_firmware_destroy(struct edgetpu_dev *etdev)
 {
 	edgetpu_firmware_destroy(etdev);
-}
-
-int edgetpu_chip_firmware_run(struct edgetpu_dev *etdev, const char *name,
-			      enum edgetpu_firmware_flags flags)
-{
-	return edgetpu_firmware_run(etdev, name, flags);
 }
 
 unsigned long edgetpu_chip_firmware_iova(struct edgetpu_dev *etdev)

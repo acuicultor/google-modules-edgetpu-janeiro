@@ -20,8 +20,8 @@
 #include "edgetpu-mmu.h"
 #include "edgetpu-telemetry.h"
 #include "janeiro-platform.h"
-#include "janeiro-pm.h"
 #include "mobile-firmware.h"
+#include "mobile-pm.h"
 
 static const struct of_device_id edgetpu_of_match[] = {
 	/* TODO(b/190677977): remove  */
@@ -120,10 +120,9 @@ void edgetpu_chip_remove_mmu(struct edgetpu_dev *etdev)
 /*
  * Set shareability for enabling IO coherency in Janeiro
  */
-//TODO(b/185301967): check if sysreg is to be moved under TrustZone
-static int janeiro_mmu_set_shareability(struct device *dev)
+static int janeiro_mmu_set_shareability(struct device *dev, u32 reg_base)
 {
-	void __iomem *addr = ioremap(EDGETPU_SYSREG_TPU_BASE, PAGE_SIZE);
+	void __iomem *addr = ioremap(reg_base, PAGE_SIZE);
 
 	if (!addr) {
 		dev_err(dev, "sysreg ioremap failed\n");
@@ -135,6 +134,27 @@ static int janeiro_mmu_set_shareability(struct device *dev)
 	iounmap(addr);
 
 	return 0;
+}
+
+static int janeiro_parse_dt(struct device *dev)
+{
+	int ret;
+	u32 reg;
+
+	if (of_find_property(dev->of_node, "edgetpu,shareability", NULL)) {
+		ret = of_property_read_u32_index(dev->of_node, "edgetpu,shareability", 0, &reg);
+		if (ret)
+			return ret;
+	} else {
+		/*
+		 * TODO(b/193593081): Remove compatibility code
+		 * Fallback for older driver versions until DT property support is
+		 * widely adopted.
+		 */
+		reg = EDGETPU_SYSREG_TPU_BASE;
+	}
+
+	return janeiro_mmu_set_shareability(dev, reg);
 }
 
 static int edgetpu_platform_probe(struct platform_device *pdev)
@@ -167,7 +187,7 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	ret = janeiro_pm_create(&edgetpu_pdev->edgetpu_dev);
+	ret = mobile_pm_create(&edgetpu_pdev->edgetpu_dev);
 	if (ret) {
 		dev_err(dev, "Failed to initialize PM interface (%d)\n", ret);
 		return ret;
@@ -207,7 +227,11 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 	for (i = 0; i < EDGETPU_NCONTEXTS; i++)
 		edgetpu_pdev->irq[i] = platform_get_irq(pdev, i);
 
-	janeiro_mmu_set_shareability(dev);
+	ret = janeiro_parse_dt(dev);
+
+	if (ret)
+		dev_warn(dev, "%s failed to enable shareability: %d\n",
+			 DRIVER_NAME, ret);
 
 	ret = edgetpu_device_add(&edgetpu_pdev->edgetpu_dev, &regs);
 
@@ -279,18 +303,17 @@ static int edgetpu_platform_remove(struct platform_device *pdev)
 	/* TODO(b/189906347): Use edgetpu_device_remove() for cleanup after
 	 * having GSA/TZ support.
 	 */
+	etdev->on_exit = true;
 	edgetpu_pm_get(etdev->pm);
-
 	for (i = 0; i < EDGETPU_NCONTEXTS; i++) {
 		if (janeiro_pdev->irq[i] >= 0)
 			edgetpu_unregister_irq(etdev, janeiro_pdev->irq[i]);
 	}
-
+	mobile_edgetpu_firmware_destroy(etdev);
 	edgetpu_telemetry_exit(etdev);
 	edgetpu_chip_exit(etdev);
 	edgetpu_debug_dump_exit(etdev);
 	edgetpu_mailbox_remove_all(etdev->mailbox_manager);
-	mobile_edgetpu_firmware_destroy(etdev);
 	edgetpu_pm_put(etdev->pm);
 	edgetpu_pm_shutdown(etdev, true);
 	edgetpu_usage_stats_exit(etdev);
@@ -298,7 +321,7 @@ static int edgetpu_platform_remove(struct platform_device *pdev)
 	edgetpu_fs_remove(etdev);
 	edgetpu_iremap_pool_destroy(etdev);
 	janeiro_platform_cleanup_fw_region(janeiro_pdev);
-	janeiro_pm_destroy(etdev);
+	mobile_pm_destroy(etdev);
 	return 0;
 }
 

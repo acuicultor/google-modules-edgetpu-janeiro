@@ -8,6 +8,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
@@ -21,32 +22,14 @@
 #include "edgetpu-internal.h"
 #include "edgetpu-kci.h"
 #include "edgetpu-pm.h"
-#include "edgetpu-shared-fw.h"
 #include "edgetpu-sw-watchdog.h"
 #include "edgetpu-telemetry.h"
 
-/*
- * Descriptor for loaded firmware, either in shared buffer mode or legacy mode
- * (non-shared, custom allocated memory).
- */
-struct edgetpu_firmware_desc {
-	/*
-	 * Mode independent buffer information. This is either passed into or
-	 * updated by handlers.
-	 */
-	struct edgetpu_firmware_buffer buf;
-	/*
-	 * Shared firmware buffer when we're using shared buffer mode. This
-	 * pointer to keep and release the reference count on unloading this
-	 * shared firmware buffer.
-	 *
-	 * This is NULL when firmware is loaded in legacy mode.
-	 */
-	struct edgetpu_shared_fw_buffer *shared_buf;
-};
+static char *firmware_name;
+module_param(firmware_name, charp, 0660);
 
 struct edgetpu_firmware_private {
-	const struct edgetpu_firmware_handlers *handlers;
+	const struct edgetpu_firmware_chip_data *chip_fw;
 	void *data; /* for edgetpu_firmware_(set/get)_data */
 
 	struct mutex fw_desc_lock;
@@ -66,120 +49,19 @@ void *edgetpu_firmware_get_data(struct edgetpu_firmware *et_fw)
 	return et_fw->p->data;
 }
 
-static int edgetpu_firmware_legacy_load_locked(
-		struct edgetpu_firmware *et_fw,
-		struct edgetpu_firmware_desc *fw_desc, const char *name)
-{
-	int ret;
-	struct edgetpu_dev *etdev = et_fw->etdev;
-	struct device *dev = etdev->dev;
-	const struct firmware *fw;
-	size_t aligned_size;
-
-	ret = request_firmware(&fw, name, dev);
-	if (ret) {
-		etdev_dbg(etdev,
-			  "%s: request '%s' failed: %d\n", __func__, name, ret);
-		return ret;
-	}
-
-	aligned_size = ALIGN(fw->size, fw_desc->buf.used_size_align);
-	if (aligned_size > fw_desc->buf.alloc_size) {
-		etdev_dbg(etdev,
-			  "%s: firmware buffer too small: alloc size=0x%zx, required size=0x%zx\n",
-			  __func__, fw_desc->buf.alloc_size, aligned_size);
-		ret = -ENOSPC;
-		goto out_release_firmware;
-	}
-
-	memcpy(fw_desc->buf.vaddr, fw->data, fw->size);
-	fw_desc->buf.used_size = aligned_size;
-	fw_desc->buf.name = kstrdup(name, GFP_KERNEL);
-
-out_release_firmware:
-	release_firmware(fw);
-	return ret;
-}
-
-static void edgetpu_firmware_legacy_unload_locked(
-		struct edgetpu_firmware *et_fw,
-		struct edgetpu_firmware_desc *fw_desc)
-{
-	kfree(fw_desc->buf.name);
-	fw_desc->buf.name = NULL;
-	fw_desc->buf.used_size = 0;
-}
-
-static int edgetpu_firmware_shared_load_locked(
-		struct edgetpu_firmware *et_fw,
-		struct edgetpu_firmware_desc *fw_desc, const char *name)
-{
-	int ret;
-	struct edgetpu_dev *etdev = et_fw->etdev;
-	struct edgetpu_shared_fw_buffer *shared_buf;
-
-	shared_buf = edgetpu_shared_fw_load(name, etdev);
-	if (IS_ERR(shared_buf)) {
-		ret = PTR_ERR(shared_buf);
-		etdev_dbg(etdev, "shared buffer loading failed: %d\n", ret);
-		return ret;
-	}
-	fw_desc->shared_buf = shared_buf;
-	fw_desc->buf.vaddr = edgetpu_shared_fw_buffer_vaddr(shared_buf);
-	fw_desc->buf.alloc_size = edgetpu_shared_fw_buffer_size(shared_buf);
-	fw_desc->buf.used_size = fw_desc->buf.alloc_size;
-	fw_desc->buf.name = edgetpu_shared_fw_buffer_name(shared_buf);
-	return 0;
-}
-
-static void edgetpu_firmware_shared_unload_locked(
-		struct edgetpu_firmware *et_fw,
-		struct edgetpu_firmware_desc *fw_desc)
-{
-	fw_desc->buf.vaddr = NULL;
-	fw_desc->buf.alloc_size = 0;
-	fw_desc->buf.used_size = 0;
-	fw_desc->buf.name = NULL;
-	edgetpu_shared_fw_put(fw_desc->shared_buf);
-	fw_desc->shared_buf = NULL;
-}
-
-static int edgetpu_firmware_do_load_locked(
-		struct edgetpu_firmware *et_fw,
-		struct edgetpu_firmware_desc *fw_desc, const char *name)
-{
-	/* Use shared firmware from host if not allocated a buffer space. */
-	if (!fw_desc->buf.vaddr)
-		return edgetpu_firmware_shared_load_locked(et_fw, fw_desc,
-							   name);
-	else
-		return edgetpu_firmware_legacy_load_locked(et_fw, fw_desc,
-							   name);
-}
-
-static void edgetpu_firmware_do_unload_locked(
-		struct edgetpu_firmware *et_fw,
-		struct edgetpu_firmware_desc *fw_desc)
-{
-	if (fw_desc->shared_buf)
-		edgetpu_firmware_shared_unload_locked(et_fw, fw_desc);
-	else
-		edgetpu_firmware_legacy_unload_locked(et_fw, fw_desc);
-}
-
 static int edgetpu_firmware_load_locked(
 		struct edgetpu_firmware *et_fw,
 		struct edgetpu_firmware_desc *fw_desc, const char *name,
 		enum edgetpu_firmware_flags flags)
 {
-	const struct edgetpu_firmware_handlers *handlers = et_fw->p->handlers;
+	const struct edgetpu_firmware_chip_data *chip_fw = et_fw->p->chip_fw;
 	struct edgetpu_dev *etdev = et_fw->etdev;
 	int ret;
 
 	fw_desc->buf.flags = flags;
 
-	if (handlers && handlers->alloc_buffer) {
-		ret = handlers->alloc_buffer(et_fw, &fw_desc->buf);
+	if (chip_fw->alloc_buffer) {
+		ret = chip_fw->alloc_buffer(et_fw, &fw_desc->buf);
 		if (ret) {
 			etdev_err(etdev, "handler alloc_buffer failed: %d\n",
 				  ret);
@@ -187,28 +69,28 @@ static int edgetpu_firmware_load_locked(
 		}
 	}
 
-	ret = edgetpu_firmware_do_load_locked(et_fw, fw_desc, name);
+	ret = edgetpu_firmware_chip_load_locked(et_fw, fw_desc, name);
 	if (ret) {
 		etdev_err(etdev, "firmware request failed: %d\n", ret);
 		goto out_free_buffer;
 	}
 
-	if (handlers && handlers->setup_buffer) {
-		ret = handlers->setup_buffer(et_fw, &fw_desc->buf);
+	if (chip_fw->setup_buffer) {
+		ret = chip_fw->setup_buffer(et_fw, &fw_desc->buf);
 		if (ret) {
 			etdev_err(etdev, "handler setup_buffer failed: %d\n",
 				  ret);
-			goto out_do_unload_locked;
+			goto out_unload_locked;
 		}
 	}
 
 	return 0;
 
-out_do_unload_locked:
-	edgetpu_firmware_do_unload_locked(et_fw, fw_desc);
+out_unload_locked:
+	edgetpu_firmware_chip_unload_locked(et_fw, fw_desc);
 out_free_buffer:
-	if (handlers && handlers->free_buffer)
-		handlers->free_buffer(et_fw, &fw_desc->buf);
+	if (chip_fw->free_buffer)
+		chip_fw->free_buffer(et_fw, &fw_desc->buf);
 	return ret;
 }
 
@@ -216,19 +98,19 @@ static void edgetpu_firmware_unload_locked(
 		struct edgetpu_firmware *et_fw,
 		struct edgetpu_firmware_desc *fw_desc)
 {
-	const struct edgetpu_firmware_handlers *handlers = et_fw->p->handlers;
+	const struct edgetpu_firmware_chip_data *chip_fw = et_fw->p->chip_fw;
 
 	/*
 	 * Platform specific implementation for cleaning up allocated buffer.
 	 */
-	if (handlers && handlers->teardown_buffer)
-		handlers->teardown_buffer(et_fw, &fw_desc->buf);
-	edgetpu_firmware_do_unload_locked(et_fw, fw_desc);
+	if (chip_fw->teardown_buffer)
+		chip_fw->teardown_buffer(et_fw, &fw_desc->buf);
+	edgetpu_firmware_chip_unload_locked(et_fw, fw_desc);
 	/*
 	 * Platform specific implementation for freeing allocated buffer.
 	 */
-	if (handlers && handlers->free_buffer)
-		handlers->free_buffer(et_fw, &fw_desc->buf);
+	if (chip_fw->free_buffer)
+		chip_fw->free_buffer(et_fw, &fw_desc->buf);
 }
 
 static char *fw_flavor_str(enum edgetpu_fw_flavor fw_flavor)
@@ -445,7 +327,7 @@ int edgetpu_firmware_run_locked(struct edgetpu_firmware *et_fw,
 				const char *name,
 				enum edgetpu_firmware_flags flags)
 {
-	const struct edgetpu_firmware_handlers *handlers = et_fw->p->handlers;
+	const struct edgetpu_firmware_chip_data *chip_fw = et_fw->p->chip_fw;
 	struct edgetpu_firmware_desc new_fw_desc;
 	int ret;
 	bool is_bl1_run = (flags & FW_BL1);
@@ -460,9 +342,9 @@ int edgetpu_firmware_run_locked(struct edgetpu_firmware *et_fw,
 		goto out_failed;
 
 	etdev_dbg(et_fw->etdev, "run fw %s flags=0x%x", name, flags);
-	if (handlers && handlers->prepare_run) {
+	if (chip_fw->prepare_run) {
 		/* Note this may recursively call us to run BL1 */
-		ret = handlers->prepare_run(et_fw, &new_fw_desc.buf);
+		ret = chip_fw->prepare_run(et_fw, &new_fw_desc.buf);
 		if (ret)
 			goto out_unload_new_fw;
 	}
@@ -486,18 +368,18 @@ int edgetpu_firmware_run_locked(struct edgetpu_firmware *et_fw,
 	if (!ret && !is_bl1_run && et_fw->p->fw_info.fw_flavor != FW_FLAVOR_BL1)
 		edgetpu_sw_wdt_start(et_fw->etdev);
 
-	if (!ret && !is_bl1_run && handlers && handlers->launch_complete)
-		handlers->launch_complete(et_fw);
-	else if (ret && handlers && handlers->launch_failed)
-		handlers->launch_failed(et_fw, ret);
+	if (!ret && !is_bl1_run && chip_fw->launch_complete)
+		chip_fw->launch_complete(et_fw);
+	else if (ret && chip_fw->launch_failed)
+		chip_fw->launch_failed(et_fw, ret);
 	edgetpu_firmware_set_state(et_fw, ret);
 	return ret;
 
 out_unload_new_fw:
 	edgetpu_firmware_unload_locked(et_fw, &new_fw_desc);
 out_failed:
-	if (handlers && handlers->launch_failed)
-		handlers->launch_failed(et_fw, ret);
+	if (chip_fw->launch_failed)
+		chip_fw->launch_failed(et_fw, ret);
 	edgetpu_firmware_set_state(et_fw, ret);
 	return ret;
 }
@@ -526,6 +408,31 @@ int edgetpu_firmware_run(struct edgetpu_dev *etdev, const char *name,
 	edgetpu_firmware_load_unlock(etdev);
 
 	return ret;
+}
+
+int edgetpu_firmware_run_default_locked(struct edgetpu_dev *etdev)
+{
+	struct edgetpu_firmware *et_fw = etdev->firmware;
+	const char *run_firmware_name =
+		et_fw->p->chip_fw->default_firmware_name;
+
+	if (firmware_name && *firmware_name)
+		run_firmware_name = firmware_name;
+
+	return edgetpu_firmware_run_locked(etdev->firmware, run_firmware_name,
+					   FW_DEFAULT);
+}
+
+int edgetpu_firmware_run_default(struct edgetpu_dev *etdev)
+{
+	struct edgetpu_firmware *et_fw = etdev->firmware;
+	const char *run_firmware_name =
+		et_fw->p->chip_fw->default_firmware_name;
+
+	if (firmware_name && *firmware_name)
+		run_firmware_name = firmware_name;
+
+	return edgetpu_firmware_run(etdev, run_firmware_name, FW_DEFAULT);
 }
 
 bool edgetpu_firmware_is_loading(struct edgetpu_dev *etdev)
@@ -558,10 +465,10 @@ edgetpu_firmware_set_status_locked(struct edgetpu_dev *etdev,
 }
 
 /* Caller must hold firmware lock for loading. */
-int edgetpu_firmware_restart_locked(struct edgetpu_dev *etdev)
+int edgetpu_firmware_restart_locked(struct edgetpu_dev *etdev, bool force_reset)
 {
 	struct edgetpu_firmware *et_fw = etdev->firmware;
-	const struct edgetpu_firmware_handlers *handlers = et_fw->p->handlers;
+	const struct edgetpu_firmware_chip_data *chip_fw = et_fw->p->chip_fw;
 	int ret = -1;
 
 	edgetpu_firmware_set_loading(et_fw);
@@ -570,10 +477,10 @@ int edgetpu_firmware_restart_locked(struct edgetpu_dev *etdev)
 	 * Try restarting the firmware first, fall back to normal firmware start
 	 * if this fails.
 	 */
-	if (handlers && handlers->restart)
-		ret = handlers->restart(et_fw);
-	if (ret && handlers && handlers->prepare_run) {
-		ret = handlers->prepare_run(et_fw, &et_fw->p->fw_desc.buf);
+	if (chip_fw->restart)
+		ret = chip_fw->restart(et_fw, force_reset);
+	if (ret && chip_fw->prepare_run) {
+		ret = chip_fw->prepare_run(et_fw, &et_fw->p->fw_desc.buf);
 		if (ret)
 			goto out;
 	}
@@ -637,7 +544,7 @@ static ssize_t load_firmware_store(
 		return PTR_ERR(name);
 
 	etdev_info(etdev, "loading firmware %s\n", name);
-	ret = edgetpu_chip_firmware_run(etdev, name, 0);
+	ret = edgetpu_firmware_run(etdev, name, 0);
 
 	kfree(name);
 
@@ -726,14 +633,14 @@ static void edgetpu_firmware_wdt_timeout_action(void *data)
 
 	ret = edgetpu_firmware_pm_get(et_fw);
 	if (!ret) {
-		ret = edgetpu_firmware_restart_locked(etdev);
+		ret = edgetpu_firmware_restart_locked(etdev, true);
 		edgetpu_pm_put(etdev->pm);
 	}
 	edgetpu_firmware_unlock(etdev);
 }
 
 int edgetpu_firmware_create(struct edgetpu_dev *etdev,
-			    const struct edgetpu_firmware_handlers *handlers)
+			    const struct edgetpu_firmware_chip_data *chip_fw)
 {
 	struct edgetpu_firmware *et_fw;
 	int ret;
@@ -751,7 +658,7 @@ int edgetpu_firmware_create(struct edgetpu_dev *etdev,
 		ret = -ENOMEM;
 		goto out_kfree_et_fw;
 	}
-	et_fw->p->handlers = handlers;
+	et_fw->p->chip_fw = chip_fw;
 
 	mutex_init(&et_fw->p->fw_desc_lock);
 
@@ -759,8 +666,8 @@ int edgetpu_firmware_create(struct edgetpu_dev *etdev,
 	if (ret)
 		goto out_kfree_et_fw_p;
 
-	if (handlers && handlers->after_create) {
-		ret = handlers->after_create(et_fw);
+	if (chip_fw->after_create) {
+		ret = chip_fw->after_create(et_fw);
 		if (ret) {
 			etdev_dbg(etdev,
 				  "%s: after create handler failed: %d\n",
@@ -791,20 +698,20 @@ out_kfree_et_fw:
 void edgetpu_firmware_destroy(struct edgetpu_dev *etdev)
 {
 	struct edgetpu_firmware *et_fw = etdev->firmware;
-	const struct edgetpu_firmware_handlers *handlers;
+	const struct edgetpu_firmware_chip_data *chip_fw;
 
 	if (!et_fw)
 		return;
 	edgetpu_sw_wdt_destroy(etdev);
 
 	if (et_fw->p) {
-		handlers = et_fw->p->handlers;
+		chip_fw = et_fw->p->chip_fw;
 		/*
 		 * Platform specific implementation, which includes stop
 		 * running firmware.
 		 */
-		if (handlers && handlers->before_destroy)
-			handlers->before_destroy(et_fw);
+		if (chip_fw->before_destroy)
+			chip_fw->before_destroy(et_fw);
 	}
 
 	device_remove_group(etdev->dev, &edgetpu_firmware_attr_group);
@@ -839,6 +746,6 @@ void edgetpu_firmware_mappings_show(struct edgetpu_dev *etdev,
 	fw_iova_target = fw_buf->dram_tpa ? fw_buf->dram_tpa : fw_buf->dma_addr;
 	iova = edgetpu_chip_firmware_iova(etdev);
 	seq_printf(s, "  0x%lx %lu fw - %pad %s\n", iova,
-		   fw_buf->alloc_size / PAGE_SIZE, &fw_iova_target,
+		   DIV_ROUND_UP(fw_buf->alloc_size, PAGE_SIZE), &fw_iova_target,
 		   fw_buf->flags & FW_ONDEV ? "dev" : "");
 }

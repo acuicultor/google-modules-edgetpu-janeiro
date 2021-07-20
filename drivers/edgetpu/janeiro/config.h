@@ -18,6 +18,8 @@
 /* Reserved VCID that uses the extra partition. */
 #define EDGETPU_VCID_EXTRA_PARTITION 0
 
+/* Is a "mobile" style device. */
+#define EDGETPU_FEATURE_MOBILE
 #define EDGETPU_HAS_WAKELOCK
 
 /*
@@ -52,6 +54,7 @@
 #define EDGETPU_REMAPPED_DATA_ADDR                                        \
 	(EDGETPU_INSTRUCTION_REMAP_BASE + EDGETPU_REMAPPED_DATA_OFFSET)
 #include "config-mailbox.h"
+#include "config-pwr-state.h"
 #include "config-tpu-cpu.h"
 #include "csrs.h"
 
