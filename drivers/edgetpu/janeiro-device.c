@@ -75,16 +75,6 @@ void edgetpu_mark_probe_fail(struct edgetpu_dev *etdev)
 {
 }
 
-struct edgetpu_dumpregs_range edgetpu_chip_statusregs_ranges[] = {
-};
-int edgetpu_chip_statusregs_nranges =
-	ARRAY_SIZE(edgetpu_chip_statusregs_ranges);
-
-struct edgetpu_dumpregs_range edgetpu_chip_tile_statusregs_ranges[] = {
-};
-int edgetpu_chip_tile_statusregs_nranges =
-	ARRAY_SIZE(edgetpu_chip_tile_statusregs_ranges);
-
 void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
 				    struct edgetpu_kci_response_element *resp)
 {

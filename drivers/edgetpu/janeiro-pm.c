@@ -25,6 +25,8 @@
 
 #define SHUTDOWN_DELAY_US_MIN		20
 #define SHUTDOWN_DELAY_US_MAX		20
+#define BOOTUP_DELAY_US_MIN		100
+#define BOOTUP_DELAY_US_MAX		150
 #define SHUTDOWN_MAX_DELAY_COUNT	20
 
 /* Default power state */
@@ -73,6 +75,7 @@ static int janeiro_pwr_state_set_locked(void *data, u64 val)
 {
 	int ret;
 	int curr_state;
+	int timeout_cnt = 0;
 	struct edgetpu_dev *etdev = (typeof(etdev))data;
 	struct device *dev = etdev->dev;
 
@@ -106,6 +109,16 @@ static int janeiro_pwr_state_set_locked(void *data, u64 val)
 				__func__, ret);
 			return ret;
 		}
+		do {
+			/* Delay 20us per retry till blk shutdown finished */
+			usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
+			curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
+			if (!curr_state)
+				break;
+			timeout_cnt++;
+		} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
+		if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
+			dev_warn(dev, "%s: blk_shutdown timeout\n", __func__);
 	}
 
 	return ret;
@@ -259,6 +272,8 @@ static int janeiro_power_up(struct edgetpu_pm *etpm)
 	if (ret)
 		return ret;
 
+	/* Delay 100us to make sure LPM is accessible */
+	usleep_range(BOOTUP_DELAY_US_MIN, BOOTUP_DELAY_US_MAX);
 	janeiro_set_lpm(etdev);
 
 	edgetpu_chip_init(etdev);

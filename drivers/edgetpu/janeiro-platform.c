@@ -164,6 +164,12 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 	struct resource *r;
 	struct edgetpu_mapped_resource regs;
 	int ret, i;
+	struct edgetpu_iface_params iface_params[] = {
+		/* Default interface */
+		{ .name = NULL },
+		/* Common name for SoC embedded devices */
+		{ .name = "edgetpu-soc" },
+	};
 
 	edgetpu_pdev = devm_kzalloc(dev, sizeof(*edgetpu_pdev), GFP_KERNEL);
 	if (!edgetpu_pdev)
@@ -233,7 +239,8 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 		dev_warn(dev, "%s failed to enable shareability: %d\n",
 			 DRIVER_NAME, ret);
 
-	ret = edgetpu_device_add(&edgetpu_pdev->edgetpu_dev, &regs);
+	ret = edgetpu_device_add(&edgetpu_pdev->edgetpu_dev, &regs, iface_params,
+				 ARRAY_SIZE(iface_params));
 
 	if (ret) {
 		dev_err(dev, "%s edgetpu setup failed: %d\n", DRIVER_NAME, ret);
