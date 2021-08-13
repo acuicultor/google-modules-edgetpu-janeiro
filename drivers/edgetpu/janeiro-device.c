@@ -15,6 +15,14 @@
 #include "janeiro-platform.h"
 #include "mobile-pm.h"
 
+#define SSMT_NS_READ_STREAM_VID_OFFSET(n) (0x1000u + (0x4u * (n)))
+#define SSMT_NS_WRITE_STREAM_VID_OFFSET(n) (0x1200u + (0x4u * (n)))
+
+#define SSMT_NS_READ_STREAM_VID_REG(base, n)                                   \
+	((base) + SSMT_NS_READ_STREAM_VID_OFFSET(n))
+#define SSMT_NS_WRITE_STREAM_VID_REG(base, n)                                  \
+	((base) + SSMT_NS_WRITE_STREAM_VID_OFFSET(n))
+
 static irqreturn_t janeiro_mailbox_handle_irq(struct edgetpu_dev *etdev,
 					      int irq)
 {
@@ -51,10 +59,6 @@ irqreturn_t edgetpu_chip_irq_handler(int irq, void *arg)
 	struct edgetpu_dev *etdev = arg;
 
 	edgetpu_telemetry_irq_handler(etdev);
-	/*
-	 * use this as HOST_NONSECURE_INT_SRC_STATUS_REG not present in
-	 * Janeiro.
-	 */
 	return janeiro_mailbox_handle_irq(etdev, irq);
 }
 
@@ -65,6 +69,17 @@ u64 edgetpu_chip_tpu_timestamp(struct edgetpu_dev *etdev)
 
 void edgetpu_chip_init(struct edgetpu_dev *etdev)
 {
+	int i;
+	struct janeiro_platform_dev *jpdev = to_janeiro_dev(etdev);
+
+	if (!jpdev->ssmt_base)
+		return;
+
+	/* Setup non-secure SCIDs, assume VID = SCID */
+	for (i = 0; i < EDGETPU_NCONTEXTS; i++) {
+		writel(i, SSMT_NS_READ_STREAM_VID_REG(jpdev->ssmt_base, i));
+		writel(i, SSMT_NS_WRITE_STREAM_VID_REG(jpdev->ssmt_base, i));
+	}
 }
 
 void edgetpu_chip_exit(struct edgetpu_dev *etdev)

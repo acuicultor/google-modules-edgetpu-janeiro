@@ -19,12 +19,16 @@ edgetpu-objs	:= edgetpu-async.o edgetpu-dmabuf.o edgetpu-iremap-pool.o \
 		   edgetpu-firmware-util.o edgetpu-firmware.o
 
 edgetpu-mobile-objs	:= edgetpu-mobile-firmware.o
+edgetpu-mcp-objs	:= edgetpu-shared-fw.o
+
 
 janeiro-objs	:= janeiro-core.o janeiro-debug-dump.o janeiro-device-group.o \
 		   janeiro-device.o janeiro-firmware.o janeiro-fs.o \
 		   janeiro-iommu.o janeiro-platform.o janeiro-pm.o \
 		   janeiro-usage-stats.o janeiro-wakelock.o \
 		   $(edgetpu-objs) $(edgetpu-mobile-objs)
+
+KBUILD_OPTIONS += CONFIG_JANEIRO=m
 
 modules modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) $(@)

@@ -951,7 +951,7 @@ void edgetpu_kci_mappings_show(struct edgetpu_dev *etdev, struct seq_file *s)
 	if (!kci || !kci->mailbox)
 		return;
 
-	seq_printf(s, "kci context %u:\n", EDGETPU_CONTEXT_KCI);
+	seq_printf(s, "kci context mbox %u:\n", EDGETPU_CONTEXT_KCI);
 	seq_printf(s, "  0x%llx %lu cmdq - %pad\n",
 		   kci->cmd_queue_mem.tpu_addr,
 		   DIV_ROUND_UP(

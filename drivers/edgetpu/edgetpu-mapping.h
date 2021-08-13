@@ -40,6 +40,8 @@ struct edgetpu_mapping {
 	u64 host_address;
 	u32 die_index; /* this mapping is mapped on the @die_index-th die */
 	tpu_addr_t device_address;
+	/* Size of buffer mapped in bytes. Always set. */
+	size_t map_size;
 	/*
 	 * The size used for allocating @alloc_iova in bytes. This field may be
 	 * set by edgetpu_mmu_map().
@@ -173,5 +175,8 @@ static inline int mmu_flag_to_iommu_prot(u32 mmu_flags, struct device *dev,
 	prot |= __dma_dir_to_iommu_prot(dir);
 	return prot;
 }
+
+/* Return total size of mappings under the supplied root. */
+size_t edgetpu_mappings_total_size(struct edgetpu_mapping_root *mappings);
 
 #endif /* __EDGETPU_MAPPING_H__ */
