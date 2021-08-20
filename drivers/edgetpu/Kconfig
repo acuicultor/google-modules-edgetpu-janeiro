@@ -10,17 +10,6 @@ config EDGETPU_FRAMEWORK
 	help
 	  This framework supports darwinn-2.0 devices.
 
-config ABROLHOS
-	tristate "Abrolhos ML accelerator direct host control driver"
-	depends on EDGETPU_FRAMEWORK
-	select PM
-	help
-	  This driver supports the Abrolhos device.  Say Y if you want to
-	  include this driver in the kernel.
-
-	  To compile this driver as a module, choose M here.  The module
-	  will be called "abrolhos".
-
 config JANEIRO
 	tristate "Janeiro ML accelerator device driver"
 	depends on EDGETPU_FRAMEWORK
@@ -31,24 +20,6 @@ config JANEIRO
 
 	  To compile this driver as a module, choose M here.  The module
 	  will be called "janeiro".
-
-config HERMOSA
-	tristate "Hermosa edgetpu ML accelerator direct host control driver"
-	depends on EDGETPU_FRAMEWORK
-	select INTERVAL_TREE if EDGETPU_DEVICE_DRAM
-	help
-	  This driver supports the Hermosa device.  Say Y if you want to
-	  include this driver in the kernel.
-
-	  To compile this driver as a module, choose M here.  The module
-	  will be called "hermosa".
-
-config EDGETPU_DEVICE_DRAM
-	bool "EdgeTPU Device DRAM support"
-	depends on HERMOSA
-	default y
-	help
-	  Say Y if the target device has the embedded device DRAM.
 
 config EDGETPU_EXTERNAL_WRAPPER_CLASS
         bool "EdgeTPU add external wrapper class"
@@ -71,7 +42,5 @@ config EDGETPU_TELEMETRY_TRACE
 
 	  It's fine to have this enabled even the firmware doesn't send tracing
 	  events.
-
-source "drivers/edgetpu/unittests/Kconfig"
 
 endmenu

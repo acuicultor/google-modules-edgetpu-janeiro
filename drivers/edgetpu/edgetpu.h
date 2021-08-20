@@ -296,7 +296,7 @@ struct edgetpu_map_dmabuf_ioctl {
 	 */
 	__u64 device_address;
 	/* A dma-buf FD. */
-	int dmabuf_fd;
+	__s32 dmabuf_fd;
 	/*
 	 * Flags indicating mapping attributes. See edgetpu_map_ioctl.flags for
 	 * details.

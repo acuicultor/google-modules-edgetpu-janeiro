@@ -103,7 +103,7 @@ edgetpu_reverse_kci_consume_response(struct edgetpu_dev *etdev,
 		edgetpu_handle_job_lockup(etdev, resp->retval);
 		break;
 	default:
-		etdev_warn(etdev, "%s: Unrecognized KCI request: 0x%x\n",
+		etdev_warn(etdev, "%s: Unrecognized KCI request: %#x\n",
 			   __func__, resp->code);
 	}
 }
@@ -292,7 +292,7 @@ static struct edgetpu_kci_response_element *edgetpu_kci_fetch_responses(
 			     CIRCULAR_QUEUE_REAL_INDEX(tail) >= size)) {
 			etdev_err_ratelimited(
 				kci->mailbox->etdev,
-				"Invalid response queue tail: 0x%x\n", tail);
+				"Invalid response queue tail: %#x\n", tail);
 			break;
 		}
 
@@ -467,7 +467,7 @@ int edgetpu_kci_init(struct edgetpu_mailbox_manager *mgr,
 
 	kci->cmd_queue = kci->cmd_queue_mem.vaddr;
 	mutex_init(&kci->cmd_queue_lock);
-	etdev_dbg(mgr->etdev, "%s: cmdq kva=%pK iova=0x%llx dma=%pad", __func__,
+	etdev_dbg(mgr->etdev, "%s: cmdq kva=%pK iova=%#llx dma=%pad", __func__,
 		  kci->cmd_queue_mem.vaddr, kci->cmd_queue_mem.tpu_addr,
 		  &kci->cmd_queue_mem.dma_addr);
 
@@ -480,7 +480,7 @@ int edgetpu_kci_init(struct edgetpu_mailbox_manager *mgr,
 	}
 	kci->resp_queue = kci->resp_queue_mem.vaddr;
 	spin_lock_init(&kci->resp_queue_lock);
-	etdev_dbg(mgr->etdev, "%s: rspq kva=%pK iova=0x%llx dma=%pad", __func__,
+	etdev_dbg(mgr->etdev, "%s: rspq kva=%pK iova=%#llx dma=%pad", __func__,
 		  kci->resp_queue_mem.vaddr, kci->resp_queue_mem.tpu_addr,
 		  &kci->resp_queue_mem.dma_addr);
 
@@ -712,14 +712,14 @@ static int edgetpu_kci_send_cmd_with_data(struct edgetpu_kci *kci,
 		return ret;
 	memcpy(mem.vaddr, data, size);
 
-	etdev_dbg(etdev, "%s: map kva=%pK iova=0x%llx dma=%pad", __func__, mem.vaddr, mem.tpu_addr,
+	etdev_dbg(etdev, "%s: map kva=%pK iova=%#llx dma=%pad", __func__, mem.vaddr, mem.tpu_addr,
 		  &mem.dma_addr);
 
 	cmd->dma.address = mem.tpu_addr;
 	cmd->dma.size = size;
 	ret = edgetpu_kci_send_cmd(kci, cmd);
 	edgetpu_iremap_free(etdev, &mem, EDGETPU_CONTEXT_KCI);
-	etdev_dbg(etdev, "%s: unmap kva=%pK iova=0x%llx dma=%pad", __func__, mem.vaddr,
+	etdev_dbg(etdev, "%s: unmap kva=%pK iova=%#llx dma=%pad", __func__, mem.vaddr,
 		  mem.tpu_addr, &mem.dma_addr);
 	return ret;
 }
@@ -850,7 +850,7 @@ enum edgetpu_fw_flavor edgetpu_kci_fw_info(struct edgetpu_kci *kci,
 			flavor = fw_info->fw_flavor;
 			break;
 		default:
-			etdev_dbg(etdev, "unrecognized fw flavor 0x%x\n",
+			etdev_dbg(etdev, "unrecognized fw flavor %#x\n",
 				  fw_info->fw_flavor);
 		}
 	} else {
@@ -951,15 +951,15 @@ void edgetpu_kci_mappings_show(struct edgetpu_dev *etdev, struct seq_file *s)
 	if (!kci || !kci->mailbox)
 		return;
 
-	seq_printf(s, "kci context %u:\n", EDGETPU_CONTEXT_KCI);
-	seq_printf(s, "  0x%llx %lu cmdq - %pad\n",
+	seq_printf(s, "kci context mbox %u:\n", EDGETPU_CONTEXT_KCI);
+	seq_printf(s, "  %#llx %lu cmdq - %pad\n",
 		   kci->cmd_queue_mem.tpu_addr,
 		   DIV_ROUND_UP(
 			QUEUE_SIZE *
 			edgetpu_kci_queue_element_size(MAILBOX_CMD_QUEUE),
 			PAGE_SIZE),
 		   &kci->cmd_queue_mem.dma_addr);
-	seq_printf(s, "  0x%llx %lu rspq - %pad\n",
+	seq_printf(s, "  %#llx %lu rspq - %pad\n",
 		   kci->resp_queue_mem.tpu_addr,
 		   DIV_ROUND_UP(
 			QUEUE_SIZE *

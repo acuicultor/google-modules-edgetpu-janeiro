@@ -338,12 +338,12 @@ static void dmabuf_map_callback_show(struct edgetpu_mapping *map,
 		container_of(map, struct edgetpu_dmabuf_map, map);
 
 	if (IS_MIRRORED(dmap->map.flags))
-		seq_printf(s, "  <%s> mirrored: iova=0x%llx pages=%llu %s",
+		seq_printf(s, "  <%s> mirrored: iova=%#llx pages=%llu %s",
 			   dmap->dmabufs[0]->exp_name, map->device_address,
 			   DIV_ROUND_UP(dmap->size, PAGE_SIZE),
 			   edgetpu_dma_dir_rw_s(map->dir));
 	else
-		seq_printf(s, "  <%s> die %u: iova=0x%llx pages=%llu %s",
+		seq_printf(s, "  <%s> die %u: iova=%#llx pages=%llu %s",
 			   dmap->dmabufs[0]->exp_name, map->die_index, map->device_address,
 			   DIV_ROUND_UP(dmap->size, PAGE_SIZE),
 			   edgetpu_dma_dir_rw_s(map->dir));
@@ -437,7 +437,7 @@ static void dmabuf_bulk_map_callback_show(struct edgetpu_mapping *map,
 		container_of(map, struct edgetpu_dmabuf_map, map);
 	int i;
 
-	seq_printf(s, "  bulk: iova=0x%llx pages=%llu %s\n",
+	seq_printf(s, "  bulk: iova=%#llx pages=%llu %s\n",
 		   map->device_address, DIV_ROUND_UP(bmap->size, PAGE_SIZE),
 		   edgetpu_dma_dir_rw_s(map->dir));
 	for (i = 0; i < bmap->num_entries; i++) {
@@ -670,7 +670,7 @@ int edgetpu_map_dmabuf(struct edgetpu_device_group *group,
 
 	get_dma_buf(dmabuf);
 	dmap->dmabufs[0] = dmabuf;
-	dmap->size = size = dmabuf->size;
+	dmap->map.map_size = dmap->size = size = dmabuf->size;
 	if (IS_MIRRORED(flags)) {
 		for (i = 0; i < group->n_clients; i++) {
 			etdev = edgetpu_device_group_nth_etdev(group, i);

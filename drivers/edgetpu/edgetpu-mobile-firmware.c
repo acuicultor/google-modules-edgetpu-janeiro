@@ -37,7 +37,7 @@ int edgetpu_firmware_chip_load_locked(
 	aligned_size = ALIGN(fw->size, fw_desc->buf.used_size_align);
 	if (aligned_size > fw_desc->buf.alloc_size) {
 		etdev_dbg(etdev,
-			  "%s: firmware buffer too small: alloc size=0x%zx, required size=0x%zx\n",
+			  "%s: firmware buffer too small: alloc size=%#zx, required size=%#zx\n",
 			  __func__, fw_desc->buf.alloc_size, aligned_size);
 		ret = -ENOSPC;
 		goto out_release_firmware;

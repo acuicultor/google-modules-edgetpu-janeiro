@@ -41,9 +41,6 @@
 #include "edgetpu-p2p-mailbox.h"
 #endif
 
-#define for_each_list_group_client(c, group) \
-	list_for_each_entry(c, &group->clients, list)
-
 #define for_each_list_group_client_safe(c, n, group) \
 	list_for_each_entry_safe(c, n, &group->clients, list)
 
@@ -143,16 +140,11 @@ static int edgetpu_group_activate(struct edgetpu_device_group *group)
 static void edgetpu_group_deactivate(struct edgetpu_device_group *group)
 {
 	u8 mailbox_id;
-	int ret;
 
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return;
 	mailbox_id = edgetpu_group_context_id_locked(group);
-	ret = edgetpu_mailbox_deactivate(group->etdev, mailbox_id);
-	if (ret)
-		etdev_err(group->etdev, "deactivate mailbox for VCID %d failed with %d",
-			  group->vcid, ret);
-	return;
+	edgetpu_mailbox_deactivate(group->etdev, mailbox_id);
 }
 
 /*
@@ -1064,7 +1056,7 @@ static void edgetpu_unmap_node(struct edgetpu_mapping *map)
 	struct sg_page_iter sg_iter;
 	uint i;
 
-	etdev_dbg(group->etdev, "%s: %u: die=%d, iova=0x%llx", __func__,
+	etdev_dbg(group->etdev, "%s: %u: die=%d, iova=%#llx", __func__,
 		  group->workload_id, map->die_index, map->device_address);
 
 	if (map->device_address) {
@@ -1113,7 +1105,7 @@ static void edgetpu_host_map_show(struct edgetpu_mapping *map,
 			seq_puts(s, "  mirrored: ");
 		else
 			seq_printf(s, "  die %u: ", map->die_index);
-		seq_printf(s, "0x%llx %lu %s 0x%llx %pap %pad\n",
+		seq_printf(s, "%#llx %lu %s %#llx %pap %pad\n",
 			   map->device_address + cur_offset,
 			   DIV_ROUND_UP(sg_dma_len(sg), PAGE_SIZE),
 			   edgetpu_dma_dir_rw_s(map->dir),
@@ -1121,6 +1113,12 @@ static void edgetpu_host_map_show(struct edgetpu_mapping *map,
 			   &dma_addr);
 		cur_offset += sg_dma_len(sg);
 	}
+}
+
+size_t edgetpu_group_mappings_total_size(struct edgetpu_device_group *group)
+{
+	return edgetpu_mappings_total_size(&group->host_mappings) +
+		edgetpu_mappings_total_size(&group->dmabuf_mappings);
 }
 
 /*
@@ -1142,6 +1140,7 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	int i;
 	int ret;
 	struct vm_area_struct *vma;
+	struct vm_area_struct **vmas;
 	unsigned int foll_flags = FOLL_LONGTERM | FOLL_WRITE;
 
 	if (size == 0)
@@ -1151,18 +1150,17 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	if (unlikely((size + offset) / PAGE_SIZE >= UINT_MAX - 1 || size + offset < size))
 		return ERR_PTR(-ENOMEM);
 	num_pages = DIV_ROUND_UP((size + offset), PAGE_SIZE);
-	etdev_dbg(etdev, "%s: hostaddr=0x%llx pages=%u", __func__, host_addr, num_pages);
+	etdev_dbg(etdev, "%s: hostaddr=%#llx pages=%u", __func__, host_addr, num_pages);
 	/*
 	 * "num_pages" is decided from user-space arguments, don't show warnings
 	 * when facing malicious input.
 	 */
 	pages = kvmalloc((num_pages * sizeof(*pages)), GFP_KERNEL | __GFP_NOWARN);
 	if (!pages) {
-		etdev_dbg(etdev, "%s: kvmalloc failed (%lu bytes)\n", __func__,
-			  (num_pages * sizeof(*pages)));
+		etdev_dbg(etdev, "%s: kvmalloc pages failed (%lu bytes)\n",
+			  __func__, (num_pages * sizeof(*pages)));
 		return ERR_PTR(-ENOMEM);
 	}
-
 	/*
 	 * The host pages might be read-only and could fail if we attempt to pin
 	 * it with FOLL_WRITE.
@@ -1176,10 +1174,43 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 		*preadonly = false;
 	}
 
+	/* Try fast call first, in case it's actually faster. */
 	ret = pin_user_pages_fast(host_addr & PAGE_MASK, num_pages, foll_flags,
 				  pages);
+	if (ret == num_pages) {
+		*pnum_pages = num_pages;
+		return pages;
+	}
 	if (ret < 0) {
-		etdev_dbg(etdev, "get user pages failed %u:%pK-%u: %d",
+		etdev_dbg(etdev, "pin_user_pages failed %u:%pK-%u: %d",
+			  group->workload_id, (void *)host_addr, num_pages,
+			  ret);
+		if (ret != -ENOMEM) {
+			num_pages = 0;
+			goto error;
+		}
+	}
+	etdev_dbg(etdev,
+		  "pin_user_pages_fast error %u:%pK npages=%u ret=%d",
+		  group->workload_id, (void *)host_addr, num_pages,
+		  ret);
+	/* Unpin any partial mapping and start over again. */
+	for (i = 0; i < ret; i++)
+		unpin_user_page(pages[i]);
+
+	/* Allocate our own vmas array non-contiguous. */
+	vmas = kvmalloc((num_pages * sizeof(*vmas)), GFP_KERNEL | __GFP_NOWARN);
+	if (!vmas) {
+		etdev_dbg(etdev, "%s: kvmalloc vmas failed (%lu bytes)\n",
+			  __func__, (num_pages * sizeof(*pages)));
+		kvfree(pages);
+		return ERR_PTR(-ENOMEM);
+	}
+	ret = pin_user_pages(host_addr & PAGE_MASK, num_pages, foll_flags,
+			     pages, vmas);
+	kvfree(vmas);
+	if (ret < 0) {
+		etdev_dbg(etdev, "pin_user_pages failed %u:%pK-%u: %d",
 			  group->workload_id, (void *)host_addr, num_pages,
 			  ret);
 		num_pages = 0;
@@ -1187,7 +1218,7 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	}
 	if (ret < num_pages) {
 		etdev_dbg(etdev,
-			  "get user pages partial %u:%pK npages=%u pinned=%d",
+			  "pin_user_pages partial %u:%pK npages=%u pinned=%d",
 			  group->workload_id, (void *)host_addr, num_pages,
 			  ret);
 		num_pages = ret;
@@ -1196,7 +1227,6 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	}
 
 	*pnum_pages = num_pages;
-
 	return pages;
 
 error:
@@ -1402,6 +1432,7 @@ int edgetpu_device_group_map(struct edgetpu_device_group *group,
 	const u32 mmu_flags = map_to_mmu_flags(flags) | EDGETPU_MMU_HOST;
 	int i;
 	bool readonly;
+	tpu_addr_t tpu_addr;
 
 	if (!valid_dma_direction(flags & EDGETPU_MAP_DIR_MASK))
 		return -EINVAL;
@@ -1445,7 +1476,7 @@ int edgetpu_device_group_map(struct edgetpu_device_group *group,
 		ret = edgetpu_device_group_map_iova_sgt(group, hmap);
 		if (ret) {
 			etdev_dbg(etdev,
-				  "group add translation failed %u:0x%llx",
+				  "group add translation failed %u:%#llx",
 				  group->workload_id, map->device_address);
 			goto error;
 		}
@@ -1457,15 +1488,20 @@ int edgetpu_device_group_map(struct edgetpu_device_group *group,
 			goto error;
 	}
 
+	map->map_size = arg->size;
+	/*
+	 * @map can be freed (by another thread) once it's added to the mappings, record the address
+	 * before that.
+	 */
+	tpu_addr = map->device_address;
 	ret = edgetpu_mapping_add(&group->host_mappings, map);
 	if (ret) {
-		etdev_dbg(etdev, "duplicate mapping %u:0x%llx",
-			  group->workload_id, map->device_address);
+		etdev_dbg(etdev, "duplicate mapping %u:%#llx", group->workload_id, tpu_addr);
 		goto error;
 	}
 
 	mutex_unlock(&group->lock);
-	arg->device_address = map->device_address;
+	arg->device_address = tpu_addr;
 	kvfree(pages);
 	return 0;
 
@@ -1507,7 +1543,7 @@ int edgetpu_device_group_unmap(struct edgetpu_device_group *group,
 	if (!map) {
 		edgetpu_mapping_unlock(&group->host_mappings);
 		etdev_dbg(group->etdev,
-			  "%s: mapping not found for workload %u: 0x%llx",
+			  "%s: mapping not found for workload %u: %#llx",
 			  __func__, group->workload_id, tpu_addr);
 		ret = -EINVAL;
 		goto unlock_group;
@@ -1577,7 +1613,10 @@ void edgetpu_mappings_clear_group(struct edgetpu_device_group *group)
 void edgetpu_group_mappings_show(struct edgetpu_device_group *group,
 				 struct seq_file *s)
 {
-	seq_printf(s, "workload %u", group->workload_id);
+	enum edgetpu_context_id context =
+		edgetpu_group_context_id_locked(group);
+
+	seq_printf(s, "group %u", group->workload_id);
 	switch (group->status) {
 	case EDGETPU_DEVICE_GROUP_WAITING:
 	case EDGETPU_DEVICE_GROUP_FINALIZED:
@@ -1589,26 +1628,35 @@ void edgetpu_group_mappings_show(struct edgetpu_device_group *group,
 		seq_puts(s, ": disbanded\n");
 		return;
 	}
-	seq_printf(s, " context %d:\n", edgetpu_group_context_id_locked(group));
+
+	if (context == EDGETPU_CONTEXT_INVALID)
+		seq_puts(s, " context (none):\n");
+	else if (context & EDGETPU_CONTEXT_DOMAIN_TOKEN)
+		seq_printf(s, " context detached %#x:\n",
+			   context & ~(EDGETPU_CONTEXT_DOMAIN_TOKEN));
+	else
+		seq_printf(s, " context mbox %d:\n", context);
 
 	if (group->host_mappings.count) {
-		seq_puts(s, "host buffer mappings:\n");
+		seq_printf(s, "host buffer mappings (%zd):\n",
+			   group->host_mappings.count);
 		edgetpu_mappings_show(&group->host_mappings, s);
 	}
 	if (group->dmabuf_mappings.count) {
-		seq_puts(s, "dma-buf buffer mappings:\n");
+		seq_printf(s, "dma-buf buffer mappings (%zd):\n",
+			   group->dmabuf_mappings.count);
 		edgetpu_mappings_show(&group->dmabuf_mappings, s);
 	}
 
 	if (group->vii.cmd_queue_mem.vaddr) {
 		seq_puts(s, "VII queues:\n");
-		seq_printf(s, "  0x%llx %lu cmdq 0x%llx %pad\n",
+		seq_printf(s, "  %#llx %lu cmdq %#llx %pad\n",
 			   group->vii.cmd_queue_mem.tpu_addr,
 			   DIV_ROUND_UP(group->vii.cmd_queue_mem.size,
 					PAGE_SIZE),
 			   group->vii.cmd_queue_mem.host_addr,
 			   &group->vii.cmd_queue_mem.dma_addr);
-		seq_printf(s, "  0x%llx %lu rspq 0x%llx %pad\n",
+		seq_printf(s, "  %#llx %lu rspq %#llx %pad\n",
 			   group->vii.resp_queue_mem.tpu_addr,
 			   DIV_ROUND_UP(group->vii.resp_queue_mem.size,
 					PAGE_SIZE),
@@ -1689,7 +1737,7 @@ out:
 void edgetpu_group_fatal_error_notify(struct edgetpu_device_group *group,
 				      uint error_mask)
 {
-	etdev_dbg(group->etdev, "notify group %u error 0x%x",
+	etdev_dbg(group->etdev, "notify group %u error %#x",
 		  group->workload_id, error_mask);
 	mutex_lock(&group->lock);
 	/*

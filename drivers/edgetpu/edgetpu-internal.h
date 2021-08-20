@@ -36,7 +36,7 @@
 #include "edgetpu-usage-stats.h"
 
 #define get_dev_for_logging(etdev)                                                                 \
-	((etdev)->etiface->etcdev ? (etdev)->etiface->etcdev : (etdev)->dev)
+	((etdev)->etiface && (etdev)->etiface->etcdev ? (etdev)->etiface->etcdev : (etdev)->dev)
 
 #define etdev_err(etdev, fmt, ...) dev_err(get_dev_for_logging(etdev), fmt, ##__VA_ARGS__)
 #define etdev_warn(etdev, fmt, ...)                                            \
@@ -84,6 +84,7 @@ struct edgetpu_coherent_mem {
 	dma_addr_t dma_addr;	/* DMA handle for downstream IOMMU, if any */
 	tpu_addr_t tpu_addr;	/* DMA handle for TPU internal IOMMU, if any */
 	u64 host_addr;		/* address mapped on host for debugging */
+	u64 phys_addr;		/* physical address, if available */
 	size_t size;
 #ifdef CONFIG_X86
 	bool is_set_uc;		/* memory has been marked uncached on X86 */
@@ -146,7 +147,7 @@ struct edgetpu_list_device_client {
 	struct edgetpu_client *client;
 };
 
-/* Macro to loop through etdev->clients (hold clients_lock prior). */
+/* loop through etdev->clients (hold clients_lock prior). */
 #define for_each_list_device_client(etdev, c)                                  \
 	list_for_each_entry(c, &etdev->clients, list)
 

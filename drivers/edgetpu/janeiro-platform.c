@@ -117,6 +117,32 @@ void edgetpu_chip_remove_mmu(struct edgetpu_dev *etdev)
 	edgetpu_mmu_detach(etdev);
 }
 
+static int janeiro_parse_ssmt(struct janeiro_platform_dev *etpdev)
+{
+	struct edgetpu_dev *etdev = &etpdev->edgetpu_dev;
+	struct platform_device *pdev = to_platform_device(etdev->dev);
+	struct resource *res;
+	int rc;
+	void __iomem *ssmt_base;
+
+	/* TODO(b/197301774): Remove when GSA configure SSMT */
+	return -EINVAL;
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ssmt");
+	if (!res) {
+		etdev_warn(etdev, "Failed to find SSMT register base");
+		return -EINVAL;
+	}
+	ssmt_base = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(ssmt_base)) {
+		rc = PTR_ERR(ssmt_base);
+		etdev_warn(etdev, "Failed to map SSMT register base: %d\n", rc);
+		return rc;
+	}
+	etpdev->ssmt_base = ssmt_base;
+	return 0;
+}
+
 /*
  * Set shareability for enabling IO coherency in Janeiro
  */
@@ -262,6 +288,13 @@ static int edgetpu_platform_probe(struct platform_device *pdev)
 			DRIVER_NAME, ret);
 		goto out_remove_device;
 	}
+
+	ret = janeiro_parse_ssmt(edgetpu_pdev);
+	if (ret)
+		dev_warn(
+			dev,
+			"SSMT setup failed (%d). Context isolation not enforced\n",
+			ret);
 
 	janeiro_get_telemetry_mem(edgetpu_pdev, EDGETPU_TELEMETRY_LOG,
 				  &edgetpu_pdev->log_mem);

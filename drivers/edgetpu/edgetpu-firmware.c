@@ -341,7 +341,7 @@ int edgetpu_firmware_run_locked(struct edgetpu_firmware *et_fw,
 	if (ret)
 		goto out_failed;
 
-	etdev_dbg(et_fw->etdev, "run fw %s flags=0x%x", name, flags);
+	etdev_dbg(et_fw->etdev, "run fw %s flags=%#x", name, flags);
 	if (chip_fw->prepare_run) {
 		/* Note this may recursively call us to run BL1 */
 		ret = chip_fw->prepare_run(et_fw, &new_fw_desc.buf);
@@ -745,7 +745,7 @@ void edgetpu_firmware_mappings_show(struct edgetpu_dev *etdev,
 		return;
 	fw_iova_target = fw_buf->dram_tpa ? fw_buf->dram_tpa : fw_buf->dma_addr;
 	iova = edgetpu_chip_firmware_iova(etdev);
-	seq_printf(s, "  0x%lx %lu fw - %pad %s\n", iova,
+	seq_printf(s, "  %#lx %lu fw - %pad %s\n", iova,
 		   DIV_ROUND_UP(fw_buf->alloc_size, PAGE_SIZE), &fw_iova_target,
 		   fw_buf->flags & FW_ONDEV ? "dev" : "");
 }

@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-#include "edgetpu-debug-dump.c"
+/*
+ * Implements chip specific details of debug dump memory initialization and SSCD registration.
+ *
+ * Copyright (C) 2021 Google, Inc.
+ */
+
+#include "mobile-debug-dump.c"
 
 int edgetpu_debug_dump_init(struct edgetpu_dev *etdev)
 {

@@ -243,7 +243,7 @@ static void telemetry_mappings_show(struct edgetpu_telemetry *tel,
 	if (!tel->inited)
 		return;
 
-	seq_printf(s, "  0x%llx %lu %s 0x%llx %pad\n",
+	seq_printf(s, "  %#llx %lu %s %#llx %pad\n",
 		   tel->coherent_mem.tpu_addr,
 		   DIV_ROUND_UP(tel->coherent_mem.size, PAGE_SIZE), tel->name,
 		   tel->coherent_mem.host_addr, &tel->coherent_mem.dma_addr);

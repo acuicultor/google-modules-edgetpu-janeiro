@@ -224,12 +224,12 @@ int edgetpu_mmap(struct edgetpu_client *client, struct vm_area_struct *vma)
 
 	if (vma->vm_start & ~PAGE_MASK) {
 		etdev_dbg(client->etdev,
-			  "Base address not page-aligned: 0x%lx\n",
+			  "Base address not page-aligned: %#lx\n",
 			  vma->vm_start);
 		return -EINVAL;
 	}
 
-	etdev_dbg(client->etdev, "%s: mmap pgoff = %lX\n", __func__,
+	etdev_dbg(client->etdev, "%s: mmap pgoff = %#lX\n", __func__,
 		  vma->vm_pgoff);
 
 	type = mmap_vma_type(vma->vm_pgoff);
@@ -545,6 +545,8 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 	 */
 	if (client->group)
 		edgetpu_device_group_leave(client);
+	/* invoke chip-dependent removal handler before releasing resources */
+	edgetpu_chip_client_remove(client);
 	edgetpu_wakelock_free(client->wakelock);
 	/*
 	 * It should be impossible to access client->wakelock after this cleanup
@@ -561,7 +563,6 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 	    1 << perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE))
 		edgetpu_telemetry_unset_event(etdev, EDGETPU_TELEMETRY_TRACE);
 
-	edgetpu_chip_client_remove(client);
 	edgetpu_client_put(client);
 }
 
