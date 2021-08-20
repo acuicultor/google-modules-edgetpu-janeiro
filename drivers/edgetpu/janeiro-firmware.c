@@ -133,7 +133,7 @@ static int janeiro_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 {
 	int ret = 0;
 	void *image_vaddr;
-	u32 tpu_addr, phys_addr, size, i, j;
+	u32 tpu_addr, phys_addr, size, i;
 	struct janeiro_image_config *image_config;
 	struct janeiro_firmware_data *data;
 	struct edgetpu_dev *etdev = et_fw->etdev;
@@ -168,10 +168,8 @@ static int janeiro_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 
 		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
 	}
-	for (i = 0, j = 0; i < MAX_IOMMU_MAPPINGS; i++) {
+	for (i = 0; i < image_config->num_iommu_mapping; i++) {
 		tpu_addr = image_config->mappings[i].virt_address;
-		if (!tpu_addr)
-			continue;
 		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
 		phys_addr = (image_config->mappings[i].image_config_value & ~(0xFFF));
 
@@ -183,17 +181,11 @@ static int janeiro_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 				  ret, tpu_addr, phys_addr, size);
 			goto err;
 		}
-		data->mappings[j].virt_address = tpu_addr;
-		data->mappings[j++].image_config_value =
-						image_config->mappings[i].image_config_value;
+		data->mappings[i].virt_address = tpu_addr;
+		data->mappings[i].image_config_value = image_config->mappings[i].image_config_value;
 	}
 
-	if (image_config->num_iommu_mapping != j) {
-		etdev_err(etdev, "Invalid firmware header\n");
-		ret = -EINVAL;
-		goto err;
-	}
-	data->num_mapping = j;
+	data->num_mapping = image_config->num_iommu_mapping;
 
 	/* Skip the header */
 	memcpy(image_vaddr, fw_buf->vaddr + MOBILE_FW_HEADER_SIZE,
@@ -201,9 +193,9 @@ static int janeiro_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 	memunmap(image_vaddr);
 	return 0;
 err:
-	while (j--) {
-		tpu_addr = data->mappings[j].virt_address;
-		size = CONFIG_TO_SIZE(data->mappings[j].image_config_value);
+	while (i--) {
+		tpu_addr = data->mappings[i].virt_address;
+		size = CONFIG_TO_SIZE(data->mappings[i].image_config_value);
 		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
 	}
 	data->num_mapping = 0;

@@ -30,6 +30,10 @@
 #define JANEIRO_CSR_MBOX_CMD_QUEUE_DOORBELL_SET_OFFSET 0x1000
 #define JANEIRO_CSR_MBOX_RESP_QUEUE_DOORBELL_SET_OFFSET 0x1800
 #define EDGETPU_MBOX_BASE JANEIRO_CSR_MBOX2_CONTEXT_ENABLE
+// TODO: check correct values
+/* CSR storing mailbox response queue doorbell status */
+#define HOST_NONSECURE_INT_SRC_STATUS_REG 0x000f0000
+#define HOST_NONSECURE_INT_SRC_CLEAR_REG 0x000f0008
 
 static inline u32 edgetpu_mailbox_get_context_csr_base(u32 index)
 {

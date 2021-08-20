@@ -670,7 +670,7 @@ int edgetpu_map_dmabuf(struct edgetpu_device_group *group,
 
 	get_dma_buf(dmabuf);
 	dmap->dmabufs[0] = dmabuf;
-	dmap->map.map_size = dmap->size = size = dmabuf->size;
+	dmap->size = size = dmabuf->size;
 	if (IS_MIRRORED(flags)) {
 		for (i = 0; i < group->n_clients; i++) {
 			etdev = edgetpu_device_group_nth_etdev(group, i);

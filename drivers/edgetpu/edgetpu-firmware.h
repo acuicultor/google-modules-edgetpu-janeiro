@@ -285,20 +285,4 @@ uint32_t edgetpu_firmware_get_cl(struct edgetpu_firmware *et_fw);
 /* Returns the build time of the image in seconds since 1970. */
 uint64_t edgetpu_firmware_get_build_time(struct edgetpu_firmware *et_fw);
 
-/*
- * Kernel verify firmware signature (if EDGETPU_FEATURE_FW_SIG enabled).
- *
- * @etdev:      the edgetpu_dev for which the initial load of a (probably
- *              shared) firmware image is requested
- * @name:       name of the image being validated (request_firmware path)
- * @image_data: passes in the pointer to the raw image with signature, returns
- *              pointer to the firmware code image.
- * @image_size: passes in the size of the raw image with signature, returns
- *              size of the firmware code image.
- */
-bool edgetpu_firmware_verify_signature(struct edgetpu_dev *etdev,
-				       const char *name,
-				       void **image_data, size_t *image_size);
-
-
 #endif /* __EDGETPU_FIRMWARE_H__ */

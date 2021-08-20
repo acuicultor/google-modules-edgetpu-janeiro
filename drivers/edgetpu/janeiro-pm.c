@@ -10,11 +10,8 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
-#include <linux/version.h>
-
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
 #include <soc/google/bcl.h>
-#endif
+#include <linux/version.h>
 
 #include "edgetpu-firmware.h"
 #include "edgetpu-internal.h"
@@ -28,9 +25,9 @@
 
 #define SHUTDOWN_DELAY_US_MIN		20
 #define SHUTDOWN_DELAY_US_MAX		20
-#define BOOTUP_DELAY_US_MIN		200
-#define BOOTUP_DELAY_US_MAX		250
-#define SHUTDOWN_MAX_DELAY_COUNT	50
+#define BOOTUP_DELAY_US_MIN		100
+#define BOOTUP_DELAY_US_MAX		150
+#define SHUTDOWN_MAX_DELAY_COUNT	20
 
 /* Default power state */
 static int power_state = TPU_ACTIVE_NOM;
@@ -115,8 +112,7 @@ static int janeiro_pwr_state_set_locked(void *data, u64 val)
 		do {
 			/* Delay 20us per retry till blk shutdown finished */
 			usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
-			/* Only poll for BLK status instead of CLK rate */
-			curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 1);
+			curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
 			if (!curr_state)
 				break;
 			timeout_cnt++;
@@ -241,14 +237,14 @@ static int janeiro_set_lpm(struct edgetpu_dev *etdev)
 
 	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_START, 1);
 	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM0_STATUS, val,
-				 val & 0x80, 20, EDGETPU_LPM_CHANGE_TIMEOUT);
+				 val & 0x80, 5, EDGETPU_LPM_CHANGE_TIMEOUT);
 	if (ret) {
 		etdev_err(etdev, "Set LPM0 failed: %d\n", ret);
 		return ret;
 	}
 	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM1_START, 1);
 	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM1_STATUS, val,
-				 val & 0x80, 20, EDGETPU_LPM_CHANGE_TIMEOUT);
+				 val & 0x80, 5, EDGETPU_LPM_CHANGE_TIMEOUT);
 	if (ret) {
 		etdev_err(etdev, "Set LPM1 failed: %d\n", ret);
 		return ret;

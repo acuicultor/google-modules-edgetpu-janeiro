@@ -10,6 +10,7 @@
 #include <linux/genalloc.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 
 #include "edgetpu-internal.h"
@@ -23,6 +24,7 @@ struct edgetpu_mempool {
 	tpu_addr_t base_tpu_addr;
 	phys_addr_t base_phys_addr;
 	size_t granule;
+	struct mutex lock;
 };
 
 int edgetpu_iremap_pool_create(struct edgetpu_dev *etdev, void *base_vaddr,
@@ -41,6 +43,8 @@ int edgetpu_iremap_pool_create(struct edgetpu_dev *etdev, void *base_vaddr,
 	pool = kmalloc(sizeof(*pool), GFP_KERNEL);
 	if (!pool)
 		return -ENOMEM;
+
+	mutex_init(&pool->lock);
 
 	pool->gen_pool = gen_pool_create(ilog2(granule), -1);
 	if (!pool->gen_pool) {
@@ -84,21 +88,21 @@ int edgetpu_iremap_alloc(struct edgetpu_dev *etdev, size_t size,
 
 	if (!etmempool)
 		return edgetpu_alloc_coherent(etdev, size, mem, context_id);
-
+	mutex_lock(&etmempool->lock);
 	size = __ALIGN_KERNEL(size, etmempool->granule);
 	addr = gen_pool_alloc(etmempool->gen_pool, size);
-	if (!addr)
+	if (!addr) {
+		mutex_unlock(&etmempool->lock);
 		return -ENOMEM;
-
+	}
 	mem->vaddr = (void *)addr;
 	offset = mem->vaddr - etmempool->base_vaddr;
 	mem->dma_addr = etmempool->base_dma_addr + offset;
 	mem->tpu_addr = etmempool->base_tpu_addr + offset;
-	mem->phys_addr = etmempool->base_phys_addr + offset;
 	mem->size = size;
 	etdev_dbg(etdev, "%s @ %llx IOVA = %llx size = %zu",
 		   __func__, (u64)mem->vaddr, mem->dma_addr, size);
-
+	mutex_unlock(&etmempool->lock);
 	return 0;
 }
 
@@ -112,12 +116,13 @@ void edgetpu_iremap_free(struct edgetpu_dev *etdev,
 		edgetpu_free_coherent(etdev, mem, context_id);
 		return;
 	}
-
+	mutex_lock(&etmempool->lock);
 	etdev_dbg(etdev, "%s @ %llx IOVA = %llx size = %zu",
 		  __func__, (u64)mem->vaddr, mem->dma_addr, mem->size);
 	gen_pool_free(etmempool->gen_pool, (unsigned long)mem->vaddr,
 		      mem->size);
 	mem->vaddr = NULL;
+	mutex_unlock(&etmempool->lock);
 }
 
 int edgetpu_iremap_mmap(struct edgetpu_dev *etdev, struct vm_area_struct *vma,

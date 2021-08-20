@@ -11,10 +11,7 @@
 #include <linux/io.h>
 #include <linux/mutex.h>
 #include <linux/types.h>
-
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
 #include <soc/google/bcl.h>
-#endif
 
 #include "edgetpu-internal.h"
 
