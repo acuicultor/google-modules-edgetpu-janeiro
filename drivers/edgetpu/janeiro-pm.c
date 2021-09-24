@@ -5,226 +5,23 @@
  * Copyright (C) 2020 Google, Inc.
  */
 
-#include <linux/atomic.h>
 #include <linux/delay.h>
 #include <linux/iopoll.h>
-#include <linux/module.h>
-#include <linux/pm_runtime.h>
-#include <linux/version.h>
 
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
-#include <soc/google/bcl.h>
-#endif
-
-#include "edgetpu-firmware.h"
+#include "edgetpu-config.h"
 #include "edgetpu-internal.h"
-#include "edgetpu-kci.h"
-#include "edgetpu-mailbox.h"
-#include "edgetpu-pm.h"
-#include "janeiro-platform.h"
+#include "edgetpu-mobile-platform.h"
 #include "mobile-pm.h"
 
-#include "edgetpu-pm.c"
+#define TPU_DEFAULT_POWER_STATE		TPU_ACTIVE_NOM
+
+#include "mobile-pm.c"
 
 #define SHUTDOWN_DELAY_US_MIN		20
 #define SHUTDOWN_DELAY_US_MAX		20
 #define BOOTUP_DELAY_US_MIN		200
 #define BOOTUP_DELAY_US_MAX		250
 #define SHUTDOWN_MAX_DELAY_COUNT	50
-
-/* Default power state */
-static int power_state = TPU_ACTIVE_NOM;
-
-module_param(power_state, int, 0660);
-
-static struct dentry *janeiro_pwr_debugfs_dir;
-
-enum edgetpu_pwr_state edgetpu_active_states[EDGETPU_NUM_STATES] = {
-	TPU_ACTIVE_UUD,
-	TPU_ACTIVE_SUD,
-	TPU_ACTIVE_UD,
-	TPU_ACTIVE_NOM,
-};
-
-uint32_t *edgetpu_states_display = edgetpu_active_states;
-
-static int janeiro_pwr_state_init(struct device *dev)
-{
-	int ret;
-	int curr_state;
-
-	pm_runtime_enable(dev);
-	curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
-
-	if (curr_state > TPU_OFF) {
-		ret = pm_runtime_get_sync(dev);
-		if (ret) {
-			dev_err(dev, "%s: pm_runtime_get_sync err: %d\n",
-				__func__, ret);
-			return ret;
-		}
-	}
-	ret = exynos_acpm_set_init_freq(TPU_ACPM_DOMAIN, curr_state);
-	if (ret) {
-		dev_err(dev, "error initializing tpu ACPM freq: %d\n", ret);
-		if (curr_state > TPU_OFF)
-			pm_runtime_put_sync(dev);
-		return ret;
-	}
-	return ret;
-}
-
-static int janeiro_pwr_state_set_locked(void *data, u64 val)
-{
-	int ret;
-	int curr_state;
-	int timeout_cnt = 0;
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct device *dev = etdev->dev;
-
-	curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
-
-	dev_dbg(dev, "Power state %d -> %llu\n", curr_state, val);
-
-	if (curr_state == TPU_OFF && val > TPU_OFF) {
-		ret = pm_runtime_get_sync(dev);
-		if (ret) {
-			dev_err(dev, "%s: pm_runtime_get_sync err: %d\n",
-				__func__, ret);
-			return ret;
-		}
-	}
-
-	/* TPU_OFF is invalid state */
-	if (val != TPU_OFF) {
-		ret = exynos_acpm_set_rate(TPU_ACPM_DOMAIN, (unsigned long)val);
-		if (ret) {
-			dev_err(dev, "error setting tpu power state: %d\n", ret);
-			pm_runtime_put_sync(dev);
-			return ret;
-		}
-	}
-
-	if (curr_state != TPU_OFF && val == TPU_OFF) {
-		ret = pm_runtime_put_sync(dev);
-		if (ret) {
-			dev_err(dev, "%s: pm_runtime_put_sync returned %d\n",
-				__func__, ret);
-			return ret;
-		}
-		do {
-			/* Delay 20us per retry till blk shutdown finished */
-			usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
-			/* Only poll for BLK status instead of CLK rate */
-			curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 1);
-			if (!curr_state)
-				break;
-			timeout_cnt++;
-		} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
-		if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
-			dev_warn(dev, "%s: blk_shutdown timeout\n", __func__);
-	}
-
-	return ret;
-}
-
-static int janeiro_pwr_state_get_locked(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct device *dev = etdev->dev;
-
-	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
-	dev_dbg(dev, "current tpu power state: %llu\n", *val);
-
-	return 0;
-}
-
-static int janeiro_pwr_state_set(void *data, u64 val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-	struct janeiro_platform_pwr *platform_pwr = &edgetpu_pdev->platform_pwr;
-	int ret = 0;
-
-	mutex_lock(&platform_pwr->state_lock);
-	platform_pwr->requested_state = val;
-	if (val >= platform_pwr->min_state)
-		ret = janeiro_pwr_state_set_locked(etdev, val);
-	mutex_unlock(&platform_pwr->state_lock);
-	return ret;
-}
-
-static int janeiro_pwr_state_get(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-	struct janeiro_platform_pwr *platform_pwr = &edgetpu_pdev->platform_pwr;
-	int ret;
-
-	mutex_lock(&platform_pwr->state_lock);
-	ret = janeiro_pwr_state_get_locked(etdev, val);
-	mutex_unlock(&platform_pwr->state_lock);
-	return ret;
-}
-
-static int janeiro_min_pwr_state_set(void *data, u64 val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-	struct janeiro_platform_pwr *platform_pwr = &edgetpu_pdev->platform_pwr;
-	int ret = 0;
-
-	mutex_lock(&platform_pwr->state_lock);
-	platform_pwr->min_state = val;
-	if (val >= platform_pwr->requested_state)
-		ret = janeiro_pwr_state_set_locked(etdev, val);
-	mutex_unlock(&platform_pwr->state_lock);
-	return ret;
-}
-
-static int janeiro_min_pwr_state_get(void *data, u64 *val)
-{
-	struct edgetpu_dev *etdev = (typeof(etdev))data;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-	struct janeiro_platform_pwr *platform_pwr = &edgetpu_pdev->platform_pwr;
-
-	mutex_lock(&platform_pwr->state_lock);
-	*val = platform_pwr->min_state;
-	mutex_unlock(&platform_pwr->state_lock);
-	return 0;
-}
-
-DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_state, janeiro_pwr_state_get,
-			 janeiro_pwr_state_set, "%llu\n");
-
-DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_min_pwr_state, janeiro_min_pwr_state_get,
-			 janeiro_min_pwr_state_set, "%llu\n");
-
-static int janeiro_get_initial_pwr_state(struct device *dev)
-{
-	switch (power_state) {
-	case TPU_ACTIVE_UUD:
-	case TPU_ACTIVE_SUD:
-	case TPU_ACTIVE_UD:
-	case TPU_ACTIVE_NOM:
-		dev_info(dev, "Initial power state: %d\n", power_state);
-		break;
-	case TPU_OFF:
-		dev_warn(dev, "Power state %d prevents control core booting",
-			 power_state);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
-		fallthrough;
-#endif
-	default:
-		dev_warn(dev, "Power state %d is invalid\n", power_state);
-		dev_warn(dev, "defaulting to active nominal\n");
-		power_state = TPU_ACTIVE_NOM;
-		break;
-	}
-	return power_state;
-}
-
-static void janeiro_power_down(struct edgetpu_pm *etpm);
 
 #define EDGETPU_PSM0_CFG 0x1c1880
 #define EDGETPU_PSM0_START 0x1c1884
@@ -234,21 +31,39 @@ static void janeiro_power_down(struct edgetpu_pm *etpm);
 #define EDGETPU_PSM1_STATUS 0x1c2888
 #define EDGETPU_LPM_CHANGE_TIMEOUT 30000
 
-static int janeiro_set_lpm(struct edgetpu_dev *etdev)
+static void janeiro_lpm_down(struct edgetpu_dev *etdev)
+{
+	int timeout_cnt = 0;
+	u32 val;
+
+	do {
+		/* Manually delay 20us per retry till LPM shutdown finished */
+		usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
+		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_REG_LPM_CONTROL);
+		if ((val & 0x1000) || (val == 0))
+			break;
+		timeout_cnt++;
+	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
+	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
+		// Log the issue then continue to perform the shutdown forcefully.
+		etdev_warn(etdev, "LPM shutdown failure, continuing BLK shutdown\n");
+}
+
+static int janeiro_lpm_up(struct edgetpu_dev *etdev)
 {
 	int ret;
 	u32 val;
 
 	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_START, 1);
-	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM0_STATUS, val,
-				 val & 0x80, 20, EDGETPU_LPM_CHANGE_TIMEOUT);
+	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM0_STATUS, val, val & 0x80, 20,
+				 EDGETPU_LPM_CHANGE_TIMEOUT);
 	if (ret) {
 		etdev_err(etdev, "Set LPM0 failed: %d\n", ret);
 		return ret;
 	}
 	edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM1_START, 1);
-	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM1_STATUS, val,
-				 val & 0x80, 20, EDGETPU_LPM_CHANGE_TIMEOUT);
+	ret = readl_poll_timeout(etdev->regs.mem + EDGETPU_PSM1_STATUS, val, val & 0x80, 20,
+				 EDGETPU_LPM_CHANGE_TIMEOUT);
 	if (ret) {
 		etdev_err(etdev, "Set LPM1 failed: %d\n", ret);
 		return ret;
@@ -260,194 +75,50 @@ static int janeiro_set_lpm(struct edgetpu_dev *etdev)
 	return 0;
 }
 
-static int janeiro_power_up(struct edgetpu_pm *etpm)
+static void janeiro_block_down(struct edgetpu_dev *etdev)
 {
-	struct edgetpu_dev *etdev = etpm->etdev;
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-#endif
-	int ret = 0;
+	int timeout_cnt = 0;
+	int curr_state;
 
-	ret = janeiro_pwr_state_set(
-		etpm->etdev, janeiro_get_initial_pwr_state(etdev->dev));
-
-	etdev_info(etpm->etdev, "Powering up\n");
-
-	if (ret)
-		return ret;
-
-	/* Delay 100us to make sure LPM is accessible */
-	usleep_range(BOOTUP_DELAY_US_MIN, BOOTUP_DELAY_US_MAX);
-	janeiro_set_lpm(etdev);
-
-	edgetpu_chip_init(etdev);
-
-	if (etdev->kci) {
-		etdev_dbg(etdev, "Resetting KCI\n");
-		edgetpu_kci_reinit(etdev->kci);
-	}
-	if (etdev->mailbox_manager) {
-		etdev_dbg(etdev, "Resetting VII mailboxes\n");
-		edgetpu_mailbox_reset_vii(etdev->mailbox_manager);
-	}
-
-	if (!etdev->firmware || etdev->on_exit)
-		return 0;
-
-	/*
-	 * Why this function uses edgetpu_firmware_*_locked functions without explicitly holding
-	 * edgetpu_firmware_lock:
-	 *
-	 * edgetpu_pm_get() is called in two scenarios - one is when the firmware loading is
-	 * attempting, another one is when the user-space clients need the device be powered
-	 * (usually through acquiring the wakelock).
-	 *
-	 * For the first scenario edgetpu_firmware_is_loading() below shall return true.
-	 * For the second scenario we are indeed called without holding the firmware lock, but the
-	 * firmware loading procedures (i.e. the first scenario) always call edgetpu_pm_get() before
-	 * changing the firmware state, and edgetpu_pm_get() is blocked until this function
-	 * finishes. In short, we are protected by the PM lock.
-	 */
-
-	if (edgetpu_firmware_is_loading(etdev))
-		return 0;
-
-	/* attempt firmware run */
-	switch (edgetpu_firmware_status_locked(etdev)) {
-	case FW_VALID:
-		ret = edgetpu_firmware_restart_locked(etdev, false);
-		break;
-	case FW_INVALID:
-		ret = edgetpu_firmware_run_default_locked(etdev);
-		break;
-	default:
-		break;
-	}
-
-	if (ret) {
-		janeiro_power_down(etpm);
-	} else {
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
-		if (!edgetpu_pdev->bcl_dev)
-			edgetpu_pdev->bcl_dev = google_retrieve_bcl_handle();
-		if (edgetpu_pdev->bcl_dev)
-			google_init_tpu_ratio(edgetpu_pdev->bcl_dev);
-#endif
-	}
-
-	return ret;
+	do {
+		/* Delay 20us per retry till blk shutdown finished */
+		usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
+		/* Only poll for BLK status instead of CLK rate */
+		curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 1);
+		if (!curr_state)
+			break;
+		timeout_cnt++;
+	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
+	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
+		etdev_warn(etdev, "%s: blk_shutdown timeout\n", __func__);
 }
 
-static void
-janeiro_pm_shutdown_firmware(struct janeiro_platform_dev *etpdev,
-			     struct edgetpu_dev *etdev)
+static void janeiro_firmware_down(struct edgetpu_dev *etdev)
 {
 	int ret;
 
 	ret = edgetpu_kci_shutdown(etdev->kci);
 	if (ret) {
-		etdev_err(etdev, "firmware shutdown failed: %d",
-			  ret);
+		etdev_err(etdev, "firmware shutdown failed: %d", ret);
 		return;
 	}
 }
 
-static void janeiro_power_down(struct edgetpu_pm *etpm)
+static int janeiro_acpm_set_rate(unsigned int id, unsigned long rate)
 {
-	struct edgetpu_dev *etdev = etpm->etdev;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-	u64 val;
-	int timeout_cnt = 0;
-
-	etdev_info(etdev, "Powering down\n");
-
-	if (janeiro_pwr_state_get(etdev, &val)) {
-		etdev_warn(etdev, "Failed to read current power state\n");
-		val = TPU_ACTIVE_NOM;
-	}
-	if (val == TPU_OFF) {
-		etdev_dbg(etdev, "Device already off, skipping shutdown\n");
-		return;
-	}
-
-	if (etdev->kci && edgetpu_firmware_status_locked(etdev) == FW_VALID) {
-		/* Update usage stats before we power off fw. */
-		edgetpu_kci_update_usage_locked(etdev);
-		janeiro_pm_shutdown_firmware(edgetpu_pdev, etdev);
-		edgetpu_kci_cancel_work_queues(etdev->kci);
-	}
-	do {
-		/* Manually delay 20us per retry till LPM shutdown finished */
-		usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
-		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_REG_LPM_CONTROL);
-		if ((val & 0x1000) || (val == 0))
-			break;
-		timeout_cnt++;
-	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
-	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
-		// Log the issue then continue to perform the shutdown forcefully.
-		etdev_err(etdev, "LPM shutdown failure, performing BLK shutdown\n");
-	janeiro_pwr_state_set(etdev, TPU_OFF);
+	return exynos_acpm_set_rate(id, rate);
 }
 
-static int janeiro_pm_after_create(struct edgetpu_pm *etpm)
+int edgetpu_chip_pm_create(struct edgetpu_dev *etdev)
 {
-	int ret;
-	struct edgetpu_dev *etdev = etpm->etdev;
-	struct janeiro_platform_dev *edgetpu_pdev = to_janeiro_dev(etdev);
-	struct device *dev = etdev->dev;
+	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
+	struct edgetpu_mobile_platform_pwr *platform_pwr = &etmdev->platform_pwr;
 
-	ret = janeiro_pwr_state_init(dev);
-	if (ret)
-		return ret;
+	platform_pwr->lpm_up = janeiro_lpm_up;
+	platform_pwr->lpm_down = janeiro_lpm_down;
+	platform_pwr->block_down = janeiro_block_down;
+	platform_pwr->firmware_down = janeiro_firmware_down;
+	platform_pwr->acpm_set_rate = janeiro_acpm_set_rate;
 
-	mutex_init(&edgetpu_pdev->platform_pwr.state_lock);
-
-	ret = janeiro_pwr_state_set(etdev,
-				     janeiro_get_initial_pwr_state(dev));
-	if (ret)
-		return ret;
-	janeiro_pwr_debugfs_dir =
-		debugfs_create_dir("power", edgetpu_fs_debugfs_dir());
-	if (IS_ERR_OR_NULL(janeiro_pwr_debugfs_dir)) {
-		etdev_warn(etdev, "Failed to create debug FS power");
-		/* don't fail the procedure on debug FS creation fails */
-		return 0;
-	}
-	debugfs_create_file("state", 0660, janeiro_pwr_debugfs_dir, etdev,
-			    &fops_tpu_pwr_state);
-	debugfs_create_file("min_state", 0660, janeiro_pwr_debugfs_dir, etdev,
-			    &fops_tpu_min_pwr_state);
-	return 0;
-}
-
-static void janeiro_pm_before_destroy(struct edgetpu_pm *etpm)
-{
-	debugfs_remove_recursive(janeiro_pwr_debugfs_dir);
-	pm_runtime_disable(etpm->etdev->dev);
-}
-
-static struct edgetpu_pm_handlers janeiro_pm_handlers = {
-	.after_create = janeiro_pm_after_create,
-	.before_destroy = janeiro_pm_before_destroy,
-	.power_up = janeiro_power_up,
-	.power_down = janeiro_power_down,
-};
-
-int mobile_pm_create(struct edgetpu_dev *etdev)
-{
-	return edgetpu_pm_create(etdev, &janeiro_pm_handlers);
-}
-
-void mobile_pm_destroy(struct edgetpu_dev *etdev)
-{
-	edgetpu_pm_destroy(etdev);
-}
-
-void mobile_pm_set_pm_qos(struct edgetpu_dev *etdev, u32 pm_qos_val)
-{
-}
-
-void mobile_pm_set_bts(struct edgetpu_dev *etdev, u32 bts_val)
-{
+	return mobile_pm_create(etdev);
 }

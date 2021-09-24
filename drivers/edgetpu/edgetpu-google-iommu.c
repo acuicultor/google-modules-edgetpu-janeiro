@@ -14,6 +14,7 @@
 #include <linux/types.h>
 #include <linux/version.h>
 
+#include "edgetpu-config.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-mapping.h"
 #include "edgetpu-mmu.h"

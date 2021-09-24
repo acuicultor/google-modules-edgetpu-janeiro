@@ -66,7 +66,7 @@ static struct dentry *edgetpu_debugfs_dir;
 		}                                                              \
 	} while (0)
 
-static bool is_edgetpu_file(struct file *file)
+bool is_edgetpu_file(struct file *file)
 {
 	if (edgetpu_is_external_wrapper_class_file(file))
 		return true;

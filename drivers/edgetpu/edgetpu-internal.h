@@ -58,12 +58,6 @@
 /* The number of TPU tiles in an edgetpu chip */
 #define EDGETPU_NTILES	16
 
-/* Up to 7 concurrent device groups / workloads per device. */
-#define EDGETPU_NGROUPS		7
-
-/* 1 context per VII/group plus 1 for KCI */
-#define EDGETPU_NCONTEXTS	(EDGETPU_NGROUPS + 1)
-
 /*
  * Common-layer context IDs for non-secure TPU access, translated to chip-
  * specific values in the mmu driver.
@@ -71,8 +65,7 @@
 enum edgetpu_context_id {
 	EDGETPU_CONTEXT_INVALID = -1,
 	EDGETPU_CONTEXT_KCI = 0,	/* TPU firmware/kernel ID 0 */
-	EDGETPU_CONTEXT_VII_BASE = 1,	/* groups 0-6 IDs 1-7 */
-	/* contexts 8 and above not yet allocated */
+	EDGETPU_CONTEXT_VII_BASE = 1,	/* groups IDs starts from 1 to (EDGETPU_CONTEXTS - 1) */
 	/* A bit mask to mark the context is an IOMMU domain token */
 	EDGETPU_CONTEXT_DOMAIN_TOKEN = 1 << 30,
 };
@@ -232,8 +225,6 @@ struct edgetpu_dev {
 	/* debug dump handlers */
 	edgetpu_debug_dump_handlers *debug_dump_handlers;
 	struct work_struct debug_dump_work;
-	/* status about if device going to be removed from system */
-	bool on_exit;
 };
 
 struct edgetpu_dev_iface {
@@ -358,6 +349,8 @@ void edgetpu_free_coherent(struct edgetpu_dev *etdev,
 			   struct edgetpu_coherent_mem *mem,
 			   enum edgetpu_context_id context_id);
 
+/* Checks if @file belongs to edgetpu driver */
+bool is_edgetpu_file(struct file *file);
 
 /* External drivers can hook up to edgetpu driver using these calls. */
 int edgetpu_open(struct edgetpu_dev_iface *etiface, struct file *file);
@@ -388,7 +381,9 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 		       const struct edgetpu_iface_params *iface_params,
 		       uint num_ifaces);
 void edgetpu_device_remove(struct edgetpu_dev *etdev);
+/* Registers IRQ. */
 int edgetpu_register_irq(struct edgetpu_dev *etdev, int irq);
+/* Reverts edgetpu_register_irq */
 void edgetpu_unregister_irq(struct edgetpu_dev *etdev, int irq);
 
 /* Core -> Device FS API */

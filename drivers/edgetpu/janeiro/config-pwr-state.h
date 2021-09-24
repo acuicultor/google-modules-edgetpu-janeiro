@@ -24,6 +24,8 @@ enum edgetpu_pwr_state {
 	TPU_ACTIVE_NOM = 1066000,
 };
 
+#define MIN_ACTIVE_STATE	TPU_ACTIVE_UUD
+
 #define EDGETPU_NUM_STATES 4
 
 extern enum edgetpu_pwr_state edgetpu_active_states[];

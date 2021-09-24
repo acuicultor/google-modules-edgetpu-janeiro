@@ -30,7 +30,11 @@
 #define QUEUE_SIZE MAX_QUEUE_SIZE
 
 /* Timeout for KCI responses from the firmware (milliseconds) */
-#if IS_ENABLED(CONFIG_EDGETPU_TEST)
+#ifdef EDGETPU_KCI_TIMEOUT
+
+#define KCI_TIMEOUT EDGETPU_KCI_TIMEOUT
+
+#elif IS_ENABLED(CONFIG_EDGETPU_TEST)
 /* fake-firmware could respond in a short time */
 #define KCI_TIMEOUT	(200)
 #else

@@ -38,7 +38,6 @@ enum edgetpu_csrs {
 };
 
 /* SYSREG TPU */
-#define EDGETPU_SYSREG_TPU_BASE	0x1cc20000
 #define EDGETPU_SYSREG_TPU_SHAREABILITY	0x700
 #define SHAREABLE_WRITE	(1 << 13)
 #define SHAREABLE_READ	(1 << 12)

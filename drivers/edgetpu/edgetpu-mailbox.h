@@ -91,7 +91,12 @@ struct edgetpu_mailbox_descriptor {
 /* Structure to hold multiple external mailboxes allocated for a device group. */
 struct edgetpu_external_mailbox {
 	/* Number of external mailboxes allocated for a device group. */
-	int count;
+	u32 count;
+	/*
+	 * Client type of external mailboxes requester, it belongs to
+	 * EDGETPU_EXT_MAILBOX_TYPE_*
+	 */
+	u64 client_type;
 	/* Leader of device group. */
 	struct edgetpu_dev *etdev;
 	/* Array of external mailboxes info with length @count. */
@@ -106,6 +111,11 @@ struct edgetpu_external_mailbox_req {
 	uint end; /* end index of external mailbox in mailbox_manager */
 	/* number of mailboxes to be allocated, should be less or equal to (end - start + 1) */
 	uint count;
+	/*
+	 * Client type of external mailboxes requester, it belongs to
+	 * EDGETPU_EXT_MAILBOX_TYPE_*
+	 */
+	u64 client_type;
 	struct edgetpu_mailbox_attr attr; /* mailbox attribute for allocation */
 };
 
@@ -487,12 +497,7 @@ static inline void edgetpu_mailbox_enable(struct edgetpu_mailbox *mailbox)
 /* Disables a mailbox by setting CSR. */
 static inline void edgetpu_mailbox_disable(struct edgetpu_mailbox *mailbox)
 {
-	/*
-	 * if device is being removed, no need to access device CSR since it
-	 * is going to be powered-off anyway
-	 */
-	if (!mailbox->etdev->on_exit)
-		EDGETPU_MAILBOX_CONTEXT_WRITE(mailbox, context_enable, 0);
+	EDGETPU_MAILBOX_CONTEXT_WRITE(mailbox, context_enable, 0);
 }
 
 #endif /* __EDGETPU_MAILBOX_H__ */

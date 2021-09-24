@@ -5,7 +5,7 @@
  * Copyright (C) 2021 Google, Inc.
  */
 
-#include "mobile-debug-dump.c"
+#include "edgetpu-debug-dump.c"
 
 int edgetpu_debug_dump_init(struct edgetpu_dev *etdev)
 {

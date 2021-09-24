@@ -11,8 +11,8 @@
 #include "edgetpu-config.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-mailbox.h"
+#include "edgetpu-mobile-platform.h"
 #include "edgetpu-telemetry.h"
-#include "janeiro-platform.h"
 #include "mobile-pm.h"
 
 #define SSMT_NS_READ_STREAM_VID_OFFSET(n) (0x1000u + (0x4u * (n)))
@@ -27,16 +27,16 @@ static irqreturn_t janeiro_mailbox_handle_irq(struct edgetpu_dev *etdev,
 					      int irq)
 {
 	struct edgetpu_mailbox *mailbox;
+	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	struct edgetpu_mailbox_manager *mgr = etdev->mailbox_manager;
 	uint i;
-	struct janeiro_platform_dev *jpdev = to_janeiro_dev(etdev);
 
 	if (!mgr)
 		return IRQ_NONE;
-	for (i = 0; i < EDGETPU_NCONTEXTS; i++)
-		if (jpdev->irq[i] == irq)
+	for (i = 0; i < etmdev->n_irq; i++)
+		if (etmdev->irq[i] == irq)
 			break;
-	if (i == EDGETPU_NCONTEXTS)
+	if (i == etmdev->n_irq)
 		return IRQ_NONE;
 	read_lock(&mgr->mailboxes_lock);
 	mailbox = mgr->mailboxes[i];
@@ -70,15 +70,19 @@ u64 edgetpu_chip_tpu_timestamp(struct edgetpu_dev *etdev)
 void edgetpu_chip_init(struct edgetpu_dev *etdev)
 {
 	int i;
-	struct janeiro_platform_dev *jpdev = to_janeiro_dev(etdev);
+	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 
-	if (!jpdev->ssmt_base)
+	/*
+	 * This only works if the SSMT is set to client-driven mode, which only GSA can do.
+	 * Skip if GSA is not available
+	 */
+	if (!etmdev->ssmt_base || !etmdev->gsa_dev)
 		return;
 
 	/* Setup non-secure SCIDs, assume VID = SCID */
 	for (i = 0; i < EDGETPU_NCONTEXTS; i++) {
-		writel(i, SSMT_NS_READ_STREAM_VID_REG(jpdev->ssmt_base, i));
-		writel(i, SSMT_NS_WRITE_STREAM_VID_REG(jpdev->ssmt_base, i));
+		writel(i, SSMT_NS_READ_STREAM_VID_REG(etmdev->ssmt_base, i));
+		writel(i, SSMT_NS_WRITE_STREAM_VID_REG(etmdev->ssmt_base, i));
 	}
 }
 
@@ -120,6 +124,7 @@ int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
 		req.count = args->count;
 		req.start = JANEIRO_EXT_DSP_MAILBOX_START;
 		req.end = JANEIRO_EXT_DSP_MAILBOX_END;
+		req.client_type = EDGETPU_EXT_MAILBOX_TYPE_DSP;
 		return edgetpu_mailbox_enable_ext(client, EDGETPU_MAILBOX_ID_USE_ASSOC, &req);
 	}
 	return -ENODEV;

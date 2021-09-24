@@ -7,6 +7,7 @@
  */
 
 #include <linux/mutex.h>
+#include <linux/platform_data/sscoredump.h>
 #include <linux/rbtree.h>
 #include <linux/slab.h>
 

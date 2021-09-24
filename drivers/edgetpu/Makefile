@@ -18,14 +18,12 @@ edgetpu-objs	:= edgetpu-async.o edgetpu-dmabuf.o edgetpu-iremap-pool.o \
 		   edgetpu-sw-watchdog.o edgetpu-telemetry.o \
 		   edgetpu-firmware-util.o edgetpu-firmware.o
 
-edgetpu-mobile-objs	:= edgetpu-mobile-firmware.o
-
-
 janeiro-objs	:= janeiro-core.o janeiro-debug-dump.o janeiro-device-group.o \
 		   janeiro-device.o janeiro-firmware.o janeiro-fs.o \
 		   janeiro-iommu.o janeiro-platform.o janeiro-pm.o \
-		   janeiro-usage-stats.o janeiro-wakelock.o \
-		   $(edgetpu-objs) $(edgetpu-mobile-objs)
+		   janeiro-usage-stats.o janeiro-wakelock.o janeiro-external.o \
+		   $(edgetpu-objs)
+
 
 KBUILD_OPTIONS += CONFIG_JANEIRO=m
 

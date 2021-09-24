@@ -13,6 +13,8 @@
 #define EDGETPU_DEV_MAX		1
 
 #define EDGETPU_HAS_MULTI_GROUPS
+/* 1 context per VII/group plus 1 for KCI */
+#define EDGETPU_NCONTEXTS 8
 /* Max number of virtual context IDs that can be allocated for one device. */
 #define EDGETPU_NUM_VCIDS 16
 /* Reserved VCID that uses the extra partition. */

@@ -52,8 +52,15 @@ enum mobile_reverse_kci_code {
 /*
  * Initialize a power management interface for an edgetpu device on mobile
  * chipsets.
+ * Needs to be called after the devices's platform_pwr struct has been initialized.
  */
 int mobile_pm_create(struct edgetpu_dev *etdev);
+
+/*
+ * Wrapper for chip-specific implementation.
+ * Typically calls mobile_pm_create after initializing the platform_pwr struct.
+ */
+int edgetpu_chip_pm_create(struct edgetpu_dev *etdev);
 
 /*
  * Destroy power management interface for an edgetpu device on mobile chipsets.

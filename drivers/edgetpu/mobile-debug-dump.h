@@ -5,10 +5,9 @@
  *
  * Copyright (C) 2021 Google, Inc.
  */
+
 #ifndef __MOBILE_DEBUG_DUMP_H__
 #define __MOBILE_DEBUG_DUMP_H__
-
-#include <linux/platform_data/sscoredump.h>
 
 #include "edgetpu-debug-dump.h"
 
@@ -23,6 +22,8 @@ struct mobile_sscd_mappings_dump {
 	u64 alloc_iova;
 	u64 size;
 };
+
+struct sscd_segment;
 
 /*
  * Collects the mapping information of all the host mapping and dmabuf mapping buffers of all

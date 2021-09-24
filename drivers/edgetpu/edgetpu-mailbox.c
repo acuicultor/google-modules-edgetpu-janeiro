@@ -853,6 +853,10 @@ static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 	if (!ext_mailbox_req)
 		return -EINVAL;
 
+	ret = edgetpu_mailbox_validate_attr(&ext_mailbox_req->attr);
+	if (ret)
+		return ret;
+
 	count = ext_mailbox_req->count;
 	attr = ext_mailbox_req->attr;
 
@@ -874,6 +878,7 @@ static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 	ext_mailbox->attr = attr;
 	ext_mailbox->count = count;
 	ext_mailbox->etdev = group->etdev;
+	ext_mailbox->client_type = ext_mailbox_req->client_type;
 
 	write_lock_irqsave(&mgr->mailboxes_lock, flags);
 	for (i = ext_mailbox_req->start; i <= ext_mailbox_req->end; i++) {
@@ -892,6 +897,7 @@ static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 				mgr->mailboxes[i] = mailbox;
 				ext_mailbox->descriptors[j++].mailbox = mailbox;
 			} else {
+				ret = PTR_ERR(mailbox);
 				goto release;
 			}
 		}
@@ -989,7 +995,7 @@ static int edgetpu_mailbox_external_alloc_enable(struct edgetpu_client *client,
 	for (i = 0; i < ext_mailbox->count; i++) {
 		id = ext_mailbox->descriptors[i].mailbox->mailbox_id;
 		etdev_dbg(group->etdev, "Enabling mailbox: %d\n", id);
-		ret = edgetpu_mailbox_activate(group->etdev, id, vcid, true);
+		ret = edgetpu_mailbox_activate(group->etdev, id, vcid, false);
 		if (ret) {
 			etdev_err(group->etdev, "Activate mailbox %d failed: %d", id, ret);
 			break;
