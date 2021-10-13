@@ -79,6 +79,147 @@ static int mobile_pwr_state_init(struct device *dev)
 	return ret;
 }
 
+static int edgetpu_core_rate_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_CLK_CORE_DEBUG);
+	return 0;
+}
+
+static int edgetpu_core_rate_set(void *data, u64 val)
+{
+	unsigned long dbg_rate_req;
+
+	dbg_rate_req = TPU_DEBUG_REQ | TPU_CLK_CORE_DEBUG;
+	dbg_rate_req |= val;
+
+	return exynos_acpm_set_rate(TPU_ACPM_DOMAIN, dbg_rate_req);
+}
+
+static int edgetpu_ctl_rate_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_CLK_CTL_DEBUG);
+	return 0;
+}
+
+static int edgetpu_ctl_rate_set(void *data, u64 val)
+{
+	unsigned long dbg_rate_req;
+
+	dbg_rate_req = TPU_DEBUG_REQ | TPU_CLK_CTL_DEBUG;
+	dbg_rate_req |= 1000;
+
+	return exynos_acpm_set_rate(TPU_ACPM_DOMAIN, dbg_rate_req);
+}
+
+static int edgetpu_axi_rate_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_CLK_AXI_DEBUG);
+	return 0;
+}
+
+static int edgetpu_axi_rate_set(void *data, u64 val)
+{
+	unsigned long dbg_rate_req;
+
+	dbg_rate_req = TPU_DEBUG_REQ | TPU_CLK_AXI_DEBUG;
+	dbg_rate_req |= 1000;
+
+	return exynos_acpm_set_rate(TPU_ACPM_DOMAIN, dbg_rate_req);
+}
+
+static int edgetpu_apb_rate_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_CLK_APB_DEBUG);
+	return 0;
+}
+
+static int edgetpu_uart_rate_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_CLK_UART_DEBUG);
+	return 0;
+}
+
+static int edgetpu_vdd_int_m_set(void *data, u64 val)
+{
+	struct device *dev = (struct device *)data;
+	unsigned long dbg_rate_req;
+
+	if (val > MAX_VOLTAGE_VAL) {
+		dev_err(dev, "Preventing INT_M voltage > %duV",
+			MAX_VOLTAGE_VAL);
+		return -EINVAL;
+	}
+
+	dbg_rate_req = TPU_DEBUG_REQ | TPU_VDD_INT_M_DEBUG;
+	dbg_rate_req |= val;
+
+	return exynos_acpm_set_rate(TPU_ACPM_DOMAIN, dbg_rate_req);
+}
+
+static int edgetpu_vdd_int_m_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_VDD_INT_M_DEBUG);
+	return 0;
+}
+
+static int edgetpu_vdd_tpu_set(void *data, u64 val)
+{
+	int ret;
+	struct device *dev = (struct device *)data;
+	unsigned long dbg_rate_req;
+
+	if (val > MAX_VOLTAGE_VAL) {
+		dev_err(dev, "Preventing VDD_TPU voltage > %duV",
+			MAX_VOLTAGE_VAL);
+		return -EINVAL;
+	}
+
+	dbg_rate_req = TPU_DEBUG_REQ | TPU_VDD_TPU_DEBUG;
+	dbg_rate_req |= val;
+
+	ret = exynos_acpm_set_rate(TPU_ACPM_DOMAIN, dbg_rate_req);
+	return ret;
+}
+
+static int edgetpu_vdd_tpu_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_VDD_TPU_DEBUG);
+	return 0;
+}
+
+static int edgetpu_vdd_tpu_m_set(void *data, u64 val)
+{
+	int ret;
+	struct device *dev = (struct device *)data;
+	unsigned long dbg_rate_req;
+
+	if (val > MAX_VOLTAGE_VAL) {
+		dev_err(dev, "Preventing VDD_TPU voltage > %duV",
+			MAX_VOLTAGE_VAL);
+		return -EINVAL;
+	}
+
+	dbg_rate_req = TPU_DEBUG_REQ | TPU_VDD_TPU_M_DEBUG;
+	dbg_rate_req |= val;
+
+	ret = exynos_acpm_set_rate(TPU_ACPM_DOMAIN, dbg_rate_req);
+	return ret;
+}
+
+static int edgetpu_vdd_tpu_m_get(void *data, u64 *val)
+{
+	*val = exynos_acpm_get_rate(TPU_ACPM_DOMAIN,
+				    TPU_DEBUG_REQ | TPU_VDD_TPU_M_DEBUG);
+	return 0;
+}
+
 static int mobile_pwr_state_set_locked(struct edgetpu_mobile_platform_dev *etmdev, u64 val)
 {
 	int ret;
@@ -221,12 +362,35 @@ static int mobile_pwr_policy_get(void *data, u64 *val)
 }
 
 DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_policy, mobile_pwr_policy_get, mobile_pwr_policy_set,
-			 "%llu\n");
+			"%llu\n");
 
 DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_state, mobile_pwr_state_get, mobile_pwr_state_set, "%llu\n");
 
 DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_min_pwr_state, mobile_min_pwr_state_get, mobile_min_pwr_state_set,
+			"%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_core_rate, edgetpu_core_rate_get,
+			 edgetpu_core_rate_set, "%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_ctl_rate, edgetpu_ctl_rate_get,
+			 edgetpu_ctl_rate_set, "%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_axi_rate, edgetpu_axi_rate_get,
+			 edgetpu_axi_rate_set, "%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_apb_rate, edgetpu_apb_rate_get, NULL,
 			 "%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_uart_rate, edgetpu_uart_rate_get, NULL,
+			 "%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_vdd_int_m, edgetpu_vdd_int_m_get,
+			 edgetpu_vdd_int_m_set, "%llu\n");
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_vdd_tpu, edgetpu_vdd_tpu_get,
+			 edgetpu_vdd_tpu_set, "%llu\n");
+DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_vdd_tpu_m, edgetpu_vdd_tpu_m_get,
+			 edgetpu_vdd_tpu_m_set, "%llu\n");
 
 static int mobile_get_initial_pwr_state(struct device *dev)
 {
@@ -259,7 +423,7 @@ static int mobile_get_initial_pwr_state(struct device *dev)
 	return power_state;
 }
 
-static void mobile_power_down(struct edgetpu_pm *etpm);
+static int mobile_power_down(struct edgetpu_pm *etpm);
 
 static int mobile_power_up(struct edgetpu_pm *etpm)
 {
@@ -357,7 +521,7 @@ static void mobile_pm_cleanup_bts_scenario(struct edgetpu_dev *etdev)
 	mutex_unlock(&platform_pwr->scenario_lock);
 }
 
-static void mobile_power_down(struct edgetpu_pm *etpm)
+static int mobile_power_down(struct edgetpu_pm *etpm)
 {
 	struct edgetpu_dev *etdev = etpm->etdev;
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
@@ -370,7 +534,7 @@ static void mobile_power_down(struct edgetpu_pm *etpm)
 
 	if (min_state >= MIN_ACTIVE_STATE) {
 		etdev_info(etdev, "Power down skipped due to min state = %d\n", min_state);
-		return;
+		return 0;
 	}
 
 	if (mobile_pwr_state_get(etdev, &val)) {
@@ -379,21 +543,30 @@ static void mobile_power_down(struct edgetpu_pm *etpm)
 	}
 	if (val == TPU_OFF) {
 		etdev_dbg(etdev, "Device already off, skipping shutdown\n");
-		return;
+		return 0;
 	}
 
 	if (edgetpu_firmware_status_locked(etdev) == FW_VALID) {
-		/* Update usage stats before we power off fw. */
-		edgetpu_kci_update_usage_locked(etdev);
-		platform_pwr->firmware_down(etdev);
+		etdev_dbg(etdev, "Power down with valid firmware, device state = %d\n",
+			  etdev->state);
+		if (etdev->state == ETDEV_STATE_GOOD) {
+			/* Update usage stats before we power off fw. */
+			edgetpu_kci_update_usage_locked(etdev);
+			platform_pwr->firmware_down(etdev);
+			/* Ensure firmware is completely off */
+			if (platform_pwr->lpm_down)
+				platform_pwr->lpm_down(etdev);
+			/* Indicate firmware is no longer running */
+			etdev->state = ETDEV_STATE_NOFW;
+		}
 		edgetpu_kci_cancel_work_queues(etdev->kci);
 		res = edgetpu_mobile_firmware_reset_cpu(etdev, true);
+		/* TODO(b/198181290): remove -EIO once gsaproxy wakelock is implemented */
+		if (res == -EAGAIN || res == -EIO)
+			return -EAGAIN;
 		if (res < 0)
 			etdev_warn(etdev, "CPU reset request failed (%d)\n", res);
 	}
-
-	if (platform_pwr->lpm_down)
-		platform_pwr->lpm_down(etdev);
 
 	mobile_pwr_state_set(etdev, TPU_OFF);
 
@@ -410,6 +583,8 @@ static void mobile_power_down(struct edgetpu_pm *etpm)
 	 * Clear the state here just in case.
 	 */
 	etmdev->secure_client = NULL;
+
+	return 0;
 }
 
 static int mobile_pm_after_create(struct edgetpu_pm *etpm)
@@ -449,6 +624,14 @@ static int mobile_pm_after_create(struct edgetpu_pm *etpm)
 	debugfs_create_file("min_state", 0660, platform_pwr->debugfs_dir, etdev,
 			    &fops_tpu_min_pwr_state);
 	debugfs_create_file("policy", 0660, platform_pwr->debugfs_dir, etdev, &fops_tpu_pwr_policy);
+	debugfs_create_file("vdd_tpu", 0660, platform_pwr->debugfs_dir, dev, &fops_tpu_vdd_tpu);
+	debugfs_create_file("vdd_tpu_m", 0660, platform_pwr->debugfs_dir, dev, &fops_tpu_vdd_tpu_m);
+	debugfs_create_file("vdd_int_m", 0660, platform_pwr->debugfs_dir, dev, &fops_tpu_vdd_int_m);
+	debugfs_create_file("core_rate", 0660, platform_pwr->debugfs_dir, dev, &fops_tpu_core_rate);
+	debugfs_create_file("ctl_rate", 0660, platform_pwr->debugfs_dir, dev, &fops_tpu_ctl_rate);
+	debugfs_create_file("axi_rate", 0660, platform_pwr->debugfs_dir, dev, &fops_tpu_axi_rate);
+	debugfs_create_file("apb_rate", 0440, platform_pwr->debugfs_dir, dev, &fops_tpu_apb_rate);
+	debugfs_create_file("uart_rate", 0440, platform_pwr->debugfs_dir, dev, &fops_tpu_uart_rate);
 
 	if (platform_pwr->after_create)
 		ret = platform_pwr->after_create(etdev);

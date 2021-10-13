@@ -12,7 +12,6 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/types.h>
-#include <linux/version.h>
 
 #include "edgetpu-config.h"
 #include "edgetpu-internal.h"
@@ -90,12 +89,6 @@ get_domain_by_context_id(struct edgetpu_dev *etdev,
 	return domain;
 }
 
-/*
- * Kernel 5.3 introduced iommu_register_device_fault_handler
- */
-
-#if KERNEL_VERSION(5, 3, 0) <=  LINUX_VERSION_CODE
-
 static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault,
 					   void *token)
 {
@@ -108,8 +101,7 @@ static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault,
 		etdev_warn(etdev, "pasid = %08X\n", fault->event.pasid);
 		etdev_warn(etdev, "perms = %08X\n", fault->event.perm);
 		etdev_warn(etdev, "addr = %llX\n", fault->event.addr);
-		etdev_warn(etdev, "fetch_addr = %llX\n",
-			  fault->event.fetch_addr);
+		etdev_warn(etdev, "fetch_addr = %llX\n", fault->event.fetch_addr);
 	} else if (fault->type == IOMMU_FAULT_PAGE_REQ) {
 		etdev_dbg(etdev, "IOMMU page request fault!\n");
 		etdev_dbg(etdev, "flags = %08X\n", fault->prm.flags);
@@ -122,36 +114,18 @@ static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault,
 	return -EAGAIN;
 }
 
-static int
-edgetpu_register_iommu_device_fault_handler(struct edgetpu_dev *etdev)
+static int edgetpu_register_iommu_device_fault_handler(struct edgetpu_dev *etdev)
 {
 	etdev_dbg(etdev, "Registering IOMMU device fault handler\n");
-	return iommu_register_device_fault_handler(
-		etdev->dev, edgetpu_iommu_dev_fault_handler, etdev);
+	return iommu_register_device_fault_handler(etdev->dev, edgetpu_iommu_dev_fault_handler,
+						   etdev);
 }
 
-static int
-edgetpu_unregister_iommu_device_fault_handler(struct edgetpu_dev *etdev)
+static int edgetpu_unregister_iommu_device_fault_handler(struct edgetpu_dev *etdev)
 {
 	etdev_dbg(etdev, "Unregistering IOMMU device fault handler\n");
 	return iommu_unregister_device_fault_handler(etdev->dev);
 }
-
-#else /* kernel version before 5.3 */
-
-static int
-edgetpu_register_iommu_device_fault_handler(struct edgetpu_dev *etdev)
-{
-	return 0;
-}
-
-static int
-edgetpu_unregister_iommu_device_fault_handler(struct edgetpu_dev *etdev)
-{
-	return 0;
-}
-
-#endif /* KERNEL_VERSION(5, 3, 0) <=  LINUX_VERSION_CODE */
 
 /* A callback for idr_for_each to release the domains */
 static int edgetpu_idr_free_domain_callback(int id, void *p, void *data)

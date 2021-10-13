@@ -6,6 +6,7 @@
  */
 
 #include <asm/page.h>
+#include <linux/bitops.h>
 #include <linux/bits.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
@@ -842,10 +843,10 @@ static bool edgetpu_mailbox_external_check_range(struct edgetpu_mailbox_manager 
 static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 					  struct edgetpu_external_mailbox_req *ext_mailbox_req)
 {
-	u32 i, j = 0;
+	u32 i, j = 0, bmap, start, end;
 	struct edgetpu_mailbox_manager *mgr = group->etdev->mailbox_manager;
 	struct edgetpu_mailbox *mailbox;
-	int ret = 0, c = 0, count;
+	int ret = 0, count;
 	struct edgetpu_external_mailbox *ext_mailbox;
 	struct edgetpu_mailbox_attr attr;
 	unsigned long flags;
@@ -857,7 +858,6 @@ static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 	if (ret)
 		return ret;
 
-	count = ext_mailbox_req->count;
 	attr = ext_mailbox_req->attr;
 
 	if (!edgetpu_mailbox_external_check_range(mgr, ext_mailbox_req->start,
@@ -868,6 +868,9 @@ static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 	if (!ext_mailbox)
 		return -ENOMEM;
 
+	bmap = ext_mailbox_req->mbox_map;
+	count = __sw_hweight32(bmap);
+
 	ext_mailbox->descriptors =
 		kcalloc(count, sizeof(struct edgetpu_mailbox_descriptor), GFP_KERNEL);
 	if (!ext_mailbox->descriptors) {
@@ -876,32 +879,41 @@ static int edgetpu_mailbox_external_alloc(struct edgetpu_device_group *group,
 	}
 
 	ext_mailbox->attr = attr;
-	ext_mailbox->count = count;
 	ext_mailbox->etdev = group->etdev;
-	ext_mailbox->client_type = ext_mailbox_req->client_type;
+	ext_mailbox->mbox_type = ext_mailbox_req->mbox_type;
+
+	start = ext_mailbox_req->start;
+	end = ext_mailbox_req->end;
 
 	write_lock_irqsave(&mgr->mailboxes_lock, flags);
-	for (i = ext_mailbox_req->start; i <= ext_mailbox_req->end; i++) {
-		if (!mgr->mailboxes[i])
-			c++;
-	}
-	if (c < count) {
-		ret = -EBUSY;
-		goto unlock;
+	while (bmap) {
+		i = ffs(bmap) + start - 1;
+		if (i > end) {
+			ret = -EINVAL;
+			goto unlock;
+		}
+		if (mgr->mailboxes[i]) {
+			ret = -EBUSY;
+			goto unlock;
+		}
+		bmap = bmap & (bmap - 1);
 	}
 
-	for (i = ext_mailbox_req->start; i <= ext_mailbox_req->end && j < count; i++) {
-		if (!mgr->mailboxes[i]) {
-			mailbox = edgetpu_mailbox_create_locked(mgr, i);
-			if (!IS_ERR(mailbox)) {
-				mgr->mailboxes[i] = mailbox;
-				ext_mailbox->descriptors[j++].mailbox = mailbox;
-			} else {
-				ret = PTR_ERR(mailbox);
-				goto release;
-			}
+	bmap = ext_mailbox_req->mbox_map;
+	while (bmap) {
+		i = ffs(bmap) + start - 1;
+		mailbox = edgetpu_mailbox_create_locked(mgr, i);
+		if (!IS_ERR(mailbox)) {
+			mgr->mailboxes[i] = mailbox;
+			ext_mailbox->descriptors[j++].mailbox = mailbox;
+		} else {
+			ret = PTR_ERR(mailbox);
+			goto release;
 		}
+		bmap = bmap & (bmap - 1);
 	}
+
+	ext_mailbox->count = j;
 
 	ret = edgetpu_mailbox_external_alloc_queue_batch(ext_mailbox);
 	if (ret)

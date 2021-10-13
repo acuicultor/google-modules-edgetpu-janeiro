@@ -11,15 +11,15 @@
 /*
  * TPU Power States:
  * 0:		Off
- * 227000	Ultra Underdrive @227MHz
- * 625000:	Super Underdrive @625MHz
+ * 226000	Ultra Underdrive @226MHz
+ * 627000:	Super Underdrive @627MHz
  * 845000:	Underdrive @845MHz
  * 1066000:	Nominal @1066MHz
  */
 enum edgetpu_pwr_state {
 	TPU_OFF = 0,
-	TPU_ACTIVE_UUD = 227000,
-	TPU_ACTIVE_SUD = 625000,
+	TPU_ACTIVE_UUD = 226000,
+	TPU_ACTIVE_SUD = 627000,
 	TPU_ACTIVE_UD  = 845000,
 	TPU_ACTIVE_NOM = 1066000,
 };

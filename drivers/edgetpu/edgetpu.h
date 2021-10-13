@@ -17,6 +17,8 @@
 /* mmap offsets for logging and tracing buffers */
 #define EDGETPU_MMAP_LOG_BUFFER_OFFSET 0x1B00000
 #define EDGETPU_MMAP_TRACE_BUFFER_OFFSET 0x1C00000
+#define EDGETPU_MMAP_LOG1_BUFFER_OFFSET 0x1D00000
+#define EDGETPU_MMAP_TRACE1_BUFFER_OFFSET 0x1E00000
 
 /* EdgeTPU map flag macros */
 
@@ -46,7 +48,6 @@ typedef __u32 edgetpu_map_flag_t;
 /* External mailbox types */
 #define EDGETPU_EXT_MAILBOX_TYPE_TZ		1
 #define EDGETPU_EXT_MAILBOX_TYPE_GSA		2
-#define EDGETPU_EXT_MAILBOX_TYPE_DSP		3
 
 struct edgetpu_map_ioctl {
 	__u64 host_address;	/* user-space address to be mapped */

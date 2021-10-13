@@ -24,6 +24,119 @@
 #include "edgetpu-mobile-platform.h"
 #include "mobile-firmware.h"
 
+static struct mobile_image_config *mobile_firmware_get_image_config(struct edgetpu_dev *etdev)
+{
+	return (struct mobile_image_config *) edgetpu_firmware_get_data(etdev->firmware);
+}
+
+static void mobile_firmware_clear_mappings(struct edgetpu_dev *etdev,
+					   struct mobile_image_config *image_config)
+{
+	tpu_addr_t tpu_addr;
+	size_t size;
+	int i;
+
+	for (i = 0; i < image_config->num_iommu_mapping; i++) {
+		tpu_addr = image_config->mappings[i].virt_address;
+		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
+		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
+	}
+}
+
+static int mobile_firmware_setup_mappings(struct edgetpu_dev *etdev,
+					  struct mobile_image_config *image_config)
+{
+	int i, ret;
+	tpu_addr_t tpu_addr;
+	size_t size;
+	phys_addr_t phys_addr;
+
+	for (i = 0; i < image_config->num_iommu_mapping; i++) {
+		tpu_addr = image_config->mappings[i].virt_address;
+		if (!tpu_addr) {
+			etdev_warn(etdev, "Invalid firmware header\n");
+			goto err;
+		}
+		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
+		phys_addr = image_config->mappings[i].image_config_value & ~(0xFFF);
+
+		etdev_dbg(etdev, "Adding IOMMU mapping for firmware : %llu -> %08llX", tpu_addr,
+			  phys_addr);
+
+		ret = edgetpu_mmu_add_translation(etdev, tpu_addr, phys_addr, size,
+						  IOMMU_READ | IOMMU_WRITE, EDGETPU_CONTEXT_KCI);
+		if (ret) {
+			etdev_err(etdev,
+				  "Unable to Map: %d tpu_addr: %#llx phys_addr: %#llx size: %#lx\n",
+				  ret, tpu_addr, phys_addr, size);
+			goto err;
+		}
+	}
+
+	return 0;
+
+err:
+	while (i--) {
+		tpu_addr = image_config->mappings[i].virt_address;
+		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
+		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
+	}
+	return ret;
+}
+
+static void mobile_firmware_clear_ns_mappings(struct edgetpu_dev *etdev,
+					      struct mobile_image_config *image_config)
+{
+	tpu_addr_t tpu_addr;
+	size_t size;
+	int i;
+
+	for (i = 0; i < image_config->num_ns_iommu_mappings; i++) {
+		tpu_addr = image_config->ns_iommu_mappings[i] & ~(0xFFF);
+		size = CONFIG_TO_MBSIZE(image_config->ns_iommu_mappings[i]);
+		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
+	}
+}
+
+static int mobile_firmware_setup_ns_mappings(struct edgetpu_dev *etdev,
+					     struct mobile_image_config *image_config)
+{
+	tpu_addr_t tpu_addr;
+	size_t size = 0;
+	int ret = 0, i;
+	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
+	phys_addr_t phys_addr = etmdev->fw_ctx_paddr;
+
+	for (i = 0; i < image_config->num_ns_iommu_mappings; i++)
+		size += CONFIG_TO_MBSIZE(image_config->ns_iommu_mappings[i]);
+
+	if (size > etmdev->fw_ctx_size) {
+		etdev_err(etdev, "Insufficient firmware context memory");
+		return -ENOSPC;
+	}
+
+	for (i = 0; i < image_config->num_ns_iommu_mappings; i++) {
+		size = CONFIG_TO_MBSIZE(image_config->ns_iommu_mappings[i]);
+		tpu_addr = image_config->ns_iommu_mappings[i] & ~(0xFFF);
+		ret = edgetpu_mmu_add_translation(etdev, tpu_addr, phys_addr,
+						  size, IOMMU_READ | IOMMU_WRITE,
+						  EDGETPU_CONTEXT_KCI);
+		if (ret)
+			goto err;
+		phys_addr += size;
+	}
+
+	return 0;
+
+err:
+	while (i--) {
+		tpu_addr = image_config->ns_iommu_mappings[i] & ~(0xFFF);
+		size = CONFIG_TO_MBSIZE(image_config->ns_iommu_mappings[i]);
+		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
+	}
+	return ret;
+}
+
 static int mobile_firmware_after_create(struct edgetpu_firmware *et_fw)
 {
 	/*
@@ -43,22 +156,15 @@ static int mobile_firmware_after_create(struct edgetpu_firmware *et_fw)
 static void mobile_firmware_before_destroy(struct edgetpu_firmware *et_fw)
 {
 	struct mobile_image_config *image_config;
-	u32 i, tpu_addr, size;
 	struct edgetpu_dev *etdev = et_fw->etdev;
 
-	image_config = edgetpu_firmware_get_data(et_fw);
+	image_config = mobile_firmware_get_image_config(etdev);
 
-	if (image_config && image_config->privilege_level == FW_PRIV_LEVEL_NS) {
-		for (i = 0; i < image_config->num_iommu_mapping; i++) {
-			tpu_addr = image_config->mappings[i].virt_address;
-			if (!tpu_addr)
-				continue;
-			size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
-			edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
-		}
-		edgetpu_firmware_set_data(et_fw, NULL);
-		kfree(image_config);
-	}
+	mobile_firmware_clear_ns_mappings(etdev, image_config);
+	if (image_config->privilege_level == FW_PRIV_LEVEL_NS)
+		mobile_firmware_clear_mappings(etdev, image_config);
+	edgetpu_firmware_set_data(et_fw, NULL);
+	kfree(image_config);
 }
 
 static int mobile_firmware_alloc_buffer(
@@ -95,11 +201,6 @@ static void mobile_firmware_free_buffer(
 	fw_buf->used_size_align = 0;
 }
 
-static struct mobile_image_config *mobile_firmware_get_image_config(struct edgetpu_dev *etdev)
-{
-	return (struct mobile_image_config *) edgetpu_firmware_get_data(etdev->firmware);
-}
-
 static void mobile_firmware_save_image_config(struct edgetpu_dev *etdev,
 					      struct mobile_image_config *image_config)
 {
@@ -108,98 +209,16 @@ static void mobile_firmware_save_image_config(struct edgetpu_dev *etdev,
 	memcpy(saved_image_config, image_config, sizeof(*saved_image_config));
 }
 
-static void mobile_firmware_clear_image_config(struct edgetpu_dev *etdev)
-{
-	struct mobile_image_config *saved_image_config = mobile_firmware_get_image_config(etdev);
-
-	memset(saved_image_config, 0, sizeof(*saved_image_config));
-}
-
-static void mobile_firmware_clear_ns_mappings(struct edgetpu_dev *etdev,
-					      struct mobile_image_config *image_config)
-{
-	unsigned int tpu_addr, size;
-	int i;
-
-	etdev_dbg(etdev, "Firmware image config changed, removing previous mappings\n");
-	for (i = 0; i < image_config->num_iommu_mapping; i++) {
-		tpu_addr = image_config->mappings[i].virt_address;
-		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
-		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
-	}
-}
-
-static int mobile_firmware_setup_ns_mappings(struct edgetpu_firmware *et_fw,
-					     struct mobile_image_config *image_config)
-{
-	struct edgetpu_dev *etdev = et_fw->etdev;
-	struct mobile_image_config *last_image_config = mobile_firmware_get_image_config(etdev);
-	int i, ret;
-	unsigned int tpu_addr, size;
-	phys_addr_t phys_addr;
-
-	if (memcmp(image_config, last_image_config, sizeof(*image_config))) {
-		mobile_firmware_clear_ns_mappings(etdev, last_image_config);
-	} else {
-		return 0;
-	}
-
-	/* Clear saved image config. It will be updated once the new config is confirmed valid */
-	mobile_firmware_clear_image_config(etdev);
-
-	for (i = 0; i < image_config->num_iommu_mapping; i++) {
-		tpu_addr = image_config->mappings[i].virt_address;
-		if (!tpu_addr) {
-			etdev_warn(etdev, "Invalid firmware header\n");
-			goto err;
-		}
-		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
-		phys_addr = (image_config->mappings[i].image_config_value & ~(0xFFF));
-
-		etdev_dbg(etdev, "Adding IOMMU mapping for firmware : %08X -> %08llX", tpu_addr,
-			  phys_addr);
-
-		ret = edgetpu_mmu_add_translation(etdev, tpu_addr, phys_addr, size,
-						  IOMMU_READ | IOMMU_WRITE, EDGETPU_CONTEXT_KCI);
-		if (ret) {
-			etdev_err(etdev,
-				   "Unable to Map: %d tpu_addr: %#x phys_addr: %#llx size: %#x\n",
-				  ret, tpu_addr, phys_addr, size);
-			goto err;
-		}
-	}
-
-	mobile_firmware_save_image_config(etdev, image_config);
-	return 0;
-
-err:
-	while (i--) {
-		tpu_addr = image_config->mappings[i].virt_address;
-		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
-		edgetpu_mmu_remove_translation(etdev, tpu_addr, size, EDGETPU_CONTEXT_KCI);
-	}
-	return ret;
-}
-
 static int mobile_firmware_gsa_authenticate(struct edgetpu_mobile_platform_dev *etmdev,
 					    struct edgetpu_firmware_buffer *fw_buf,
 					    struct mobile_image_config *image_config,
 					    void *image_vaddr)
 {
 	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
-	struct mobile_image_config *saved_image_config = mobile_firmware_get_image_config(etdev);
-	struct mobile_image_config last_image_config;
 	void *header_vaddr;
 	dma_addr_t header_dma_addr;
 	int tpu_state;
 	int ret = 0;
-	bool image_config_changed = memcmp(image_config, saved_image_config, sizeof(*image_config));
-
-	/* Need a local copy of the saved image in case we need to undo NS mappings */
-	memcpy(&last_image_config, saved_image_config, sizeof(last_image_config));
-
-	/* Clear saved image config. It will be updated once the new config is confirmed valid */
-	mobile_firmware_clear_image_config(etdev);
 
 	tpu_state = gsa_send_tpu_cmd(etmdev->gsa_dev, GSA_TPU_GET_STATE);
 
@@ -238,24 +257,8 @@ static int mobile_firmware_gsa_authenticate(struct edgetpu_mobile_platform_dev *
 
 	ret = gsa_load_tpu_fw_image(etmdev->gsa_dev, header_dma_addr,
 				    etmdev->fw_region_paddr);
-	if (ret) {
+	if (ret)
 		etdev_err(etdev, "GSA authentication failed: %d\n", ret);
-	} else {
-		/* Transitioning from NS to something else, clear NS mappings */
-		if (last_image_config.privilege_level == FW_PRIV_LEVEL_NS &&
-		    image_config->privilege_level != FW_PRIV_LEVEL_NS)
-			mobile_firmware_clear_ns_mappings(etdev, &last_image_config);
-
-		/*
-		 * No change in image config, save it here so mobile_firmware_setup_ns_mappings()
-		 * can re-use existing mappings
-		 */
-		if (!image_config_changed)
-			mobile_firmware_save_image_config(etdev, image_config);
-
-		if (image_config->privilege_level == FW_PRIV_LEVEL_NS)
-			ret = mobile_firmware_setup_ns_mappings(etdev->firmware, image_config);
-	}
 
 	dma_free_coherent(etmdev->gsa_dev, MOBILE_FW_HEADER_SIZE, header_vaddr, header_dma_addr);
 
@@ -324,10 +327,12 @@ static int mobile_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 {
 	int ret = 0;
 	void *image_vaddr;
-	struct mobile_image_config *image_config;
 	struct edgetpu_dev *etdev = et_fw->etdev;
+	struct mobile_image_config *image_config;
+	struct mobile_image_config *last_image_config = mobile_firmware_get_image_config(etdev);
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	phys_addr_t image_start, image_end, carveout_start, carveout_end;
+	bool image_config_changed;
 
 	if (fw_buf->used_size < MOBILE_FW_HEADER_SIZE) {
 		etdev_err(etdev, "Invalid buffer size: %zu < %d\n",
@@ -347,6 +352,8 @@ static int mobile_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 	memcpy(&etdev->fw_version, &image_config->firmware_versions,
 	       sizeof(etdev->fw_version));
 
+	image_config_changed = memcmp(image_config, last_image_config, sizeof(*image_config));
+
 	if (etmdev->gsa_dev) {
 		ret = mobile_firmware_gsa_authenticate(etmdev, fw_buf, image_config, image_vaddr);
 	} else if (image_config->privilege_level == FW_PRIV_LEVEL_NS) {
@@ -354,7 +361,6 @@ static int mobile_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 		/* Copy the firmware image to the target location, skipping the header */
 		memcpy(image_vaddr, fw_buf->vaddr + MOBILE_FW_HEADER_SIZE,
 		       fw_buf->used_size - MOBILE_FW_HEADER_SIZE);
-		ret = mobile_firmware_setup_ns_mappings(et_fw, image_config);
 	} else {
 		etdev_err(etdev,
 			  "Cannot load firmware at privilege level %d with no authentication\n",
@@ -376,8 +382,26 @@ static int mobile_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 		etdev_err(etdev, "Image config: %pap - %pap\n", &image_start, &image_end);
 		etdev_err(etdev, "Carveout: %pap - %pap\n", &carveout_start, &carveout_end);
 		ret = -ERANGE;
+		goto out;
 	}
 
+	if (image_config_changed) {
+		/* clear last image mappings */
+		if (last_image_config->privilege_level == FW_PRIV_LEVEL_NS)
+			mobile_firmware_clear_mappings(etdev, last_image_config);
+
+		if (image_config->privilege_level == FW_PRIV_LEVEL_NS)
+			ret = mobile_firmware_setup_mappings(etdev, image_config);
+		if (ret)
+			goto out;
+		mobile_firmware_clear_ns_mappings(etdev, last_image_config);
+		ret = mobile_firmware_setup_ns_mappings(etdev, image_config);
+		if (ret) {
+			mobile_firmware_clear_mappings(etdev, image_config);
+			goto out;
+		}
+		mobile_firmware_save_image_config(etdev, image_config);
+	}
 out:
 	memunmap(image_vaddr);
 	return ret;

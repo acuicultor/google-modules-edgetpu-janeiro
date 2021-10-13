@@ -175,6 +175,7 @@ enum edgetpu_dev_state {
 struct edgetpu_dev {
 	struct device *dev;	   /* platform/pci bus device */
 	uint num_ifaces;		   /* Number of device interfaces */
+	uint num_cores; /* Number of cores */
 	/*
 	 * Array of device interfaces
 	 * First element is the default interface
@@ -475,5 +476,11 @@ int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
 /* Chip-specific code to release external mailboxes */
 int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
 				     struct edgetpu_ext_mailbox_ioctl *args);
+
+/*
+ * Chip specific function to get indexes of external mailbox based on
+ * @mbox_type
+ */
+int edgetpu_chip_get_ext_mailbox_index(u32 mbox_type, u32 *start, u32 *end);
 
 #endif /* __EDGETPU_INTERNAL_H__ */

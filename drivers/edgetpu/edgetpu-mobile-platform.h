@@ -75,6 +75,10 @@ struct edgetpu_mobile_platform_dev {
 	phys_addr_t shared_mem_paddr;
 	/* Size of the shared memory region size */
 	size_t shared_mem_size;
+	/* Physical address of the firmware context region */
+	phys_addr_t fw_ctx_paddr;
+	/* Size of the firmware context region */
+	size_t fw_ctx_size;
 	/*
 	 * Pointer to GSA device for firmware authentication.
 	 * May be NULL if the chip does not support firmware authentication
@@ -83,9 +87,9 @@ struct edgetpu_mobile_platform_dev {
 	/* Virtual address of the SSMT block for this chip. */
 	void __iomem *ssmt_base;
 	/* Coherent log buffer */
-	struct edgetpu_coherent_mem log_mem;
+	struct edgetpu_coherent_mem *log_mem;
 	/* Coherent trace buffer */
-	struct edgetpu_coherent_mem trace_mem;
+	struct edgetpu_coherent_mem *trace_mem;
 #if IS_ENABLED(CONFIG_GOOGLE_BCL)
 	struct bcl_device *bcl_dev;
 #endif

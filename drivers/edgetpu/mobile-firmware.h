@@ -12,7 +12,8 @@
 #include "edgetpu-internal.h"
 #include "edgetpu.h"
 
-#define MAX_IOMMU_MAPPINGS 26
+#define MAX_IOMMU_MAPPINGS 23
+#define MAX_NS_IOMMU_MAPPINGS 5
 
 #define FW_PRIV_LEVEL_GSA		(0)
 #define FW_PRIV_LEVEL_TZ		(1)
@@ -26,6 +27,8 @@
 #define MOBILE_IMAGE_CONFIG_OFFSET (MOBILE_HEADER_OFFSET + 0x160)
 
 #define CONFIG_TO_SIZE(a) ((1 << ((a) & 0xFFF)) << 12)
+
+#define CONFIG_TO_MBSIZE(a) (((a) & 0xFFF) << 20)
 
 struct iommu_mapping {
 	/* TPU virt address */
@@ -51,6 +54,8 @@ struct mobile_image_config {
 	__u32 remapped_region_end;
 	__u32 num_iommu_mapping;
 	struct iommu_mapping mappings[MAX_IOMMU_MAPPINGS];
+	__u32 num_ns_iommu_mappings;
+	__u32 ns_iommu_mappings[MAX_NS_IOMMU_MAPPINGS];
 } __packed;
 
 /*

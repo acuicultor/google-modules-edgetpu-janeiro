@@ -111,30 +111,31 @@ void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
 	}
 }
 
+int edgetpu_chip_get_ext_mailbox_index(u32 mbox_type, u32 *start, u32 *end)
+{
+	switch (mbox_type) {
+	case EDGETPU_EXTERNAL_MAILBOX_TYPE_DSP:
+		*start = JANEIRO_EXT_DSP_MAILBOX_START;
+		*end = JANEIRO_EXT_DSP_MAILBOX_END;
+		return 0;
+	case EDGETPU_EXTERNAL_MAILBOX_TYPE_AOC:
+		*start = JANEIRO_EXT_AOC_MAILBOX_START;
+		*end = JANEIRO_EXT_AOC_MAILBOX_END;
+		return 0;
+	default:
+		return -ENOENT;
+	}
+}
+
 int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
 				     struct edgetpu_ext_mailbox_ioctl *args)
 {
-	struct edgetpu_external_mailbox_req req;
-
-	if (args->type == EDGETPU_EXT_MAILBOX_TYPE_DSP) {
-		if (!args->count || args->count > EDGETPU_NUM_EXT_MAILBOXES)
-			return -EINVAL;
-		if (copy_from_user(&req.attr, (void __user *)args->attrs, sizeof(req.attr)))
-			return -EFAULT;
-		req.count = args->count;
-		req.start = JANEIRO_EXT_DSP_MAILBOX_START;
-		req.end = JANEIRO_EXT_DSP_MAILBOX_END;
-		req.client_type = EDGETPU_EXT_MAILBOX_TYPE_DSP;
-		return edgetpu_mailbox_enable_ext(client, EDGETPU_MAILBOX_ID_USE_ASSOC, &req);
-	}
 	return -ENODEV;
 }
 
 int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
 				     struct edgetpu_ext_mailbox_ioctl *args)
 {
-	if (args->type == EDGETPU_EXT_MAILBOX_TYPE_DSP)
-		return edgetpu_mailbox_disable_ext(client, EDGETPU_MAILBOX_ID_USE_ASSOC);
 	return -ENODEV;
 }
 

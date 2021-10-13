@@ -88,15 +88,17 @@ struct edgetpu_mailbox_descriptor {
 	edgetpu_queue_mem resp_queue_mem;
 };
 
+enum edgetpu_ext_mailbox_type {
+	EDGETPU_EXTERNAL_MAILBOX_TYPE_DSP,
+	EDGETPU_EXTERNAL_MAILBOX_TYPE_AOC,
+};
+
 /* Structure to hold multiple external mailboxes allocated for a device group. */
 struct edgetpu_external_mailbox {
 	/* Number of external mailboxes allocated for a device group. */
 	u32 count;
-	/*
-	 * Client type of external mailboxes requester, it belongs to
-	 * EDGETPU_EXT_MAILBOX_TYPE_*
-	 */
-	u64 client_type;
+	/* Type of external mailbox */
+	enum edgetpu_ext_mailbox_type mbox_type;
 	/* Leader of device group. */
 	struct edgetpu_dev *etdev;
 	/* Array of external mailboxes info with length @count. */
@@ -109,13 +111,8 @@ struct edgetpu_external_mailbox {
 struct edgetpu_external_mailbox_req {
 	uint start; /* starting index of external mailbox in mailbox_manager */
 	uint end; /* end index of external mailbox in mailbox_manager */
-	/* number of mailboxes to be allocated, should be less or equal to (end - start + 1) */
-	uint count;
-	/*
-	 * Client type of external mailboxes requester, it belongs to
-	 * EDGETPU_EXT_MAILBOX_TYPE_*
-	 */
-	u64 client_type;
+	uint mbox_map; /* bitmap of mailbox indexes to be allocated */
+	enum edgetpu_ext_mailbox_type mbox_type; /* Type of external mailbox */
 	struct edgetpu_mailbox_attr attr; /* mailbox attribute for allocation */
 };
 

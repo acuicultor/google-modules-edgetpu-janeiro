@@ -49,6 +49,19 @@ enum mobile_reverse_kci_code {
 	RKCI_CODE_BTS = RKCI_CHIP_CODE_FIRST + 2,
 };
 
+#define MAX_VOLTAGE_VAL 1250000
+#define TPU_DEBUG_REQ (1 << 31)
+#define TPU_VDD_TPU_DEBUG (0 << 27)
+#define TPU_VDD_TPU_M_DEBUG (1 << 27)
+#define TPU_VDD_INT_M_DEBUG (2 << 27)
+#define TPU_CLK_CORE_DEBUG (3 << 27)
+#define TPU_CLK_CTL_DEBUG (4 << 27)
+#define TPU_CLK_AXI_DEBUG (5 << 27)
+#define TPU_CLK_APB_DEBUG (6 << 27)
+#define TPU_CLK_UART_DEBUG (7 << 27)
+#define TPU_CORE_PWR_DEBUG (8 << 27)
+#define TPU_DEBUG_VALUE_MASK ((1 << 27) - 1)
+
 /*
  * Initialize a power management interface for an edgetpu device on mobile
  * chipsets.

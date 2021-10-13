@@ -21,7 +21,8 @@ edgetpu-objs	:= edgetpu-async.o edgetpu-dmabuf.o edgetpu-iremap-pool.o \
 janeiro-objs	:= janeiro-core.o janeiro-debug-dump.o janeiro-device-group.o \
 		   janeiro-device.o janeiro-firmware.o janeiro-fs.o \
 		   janeiro-iommu.o janeiro-platform.o janeiro-pm.o \
-		   janeiro-usage-stats.o janeiro-wakelock.o janeiro-external.o \
+		   janeiro-thermal.o janeiro-usage-stats.o janeiro-wakelock.o \
+		   janeiro-external.o \
 		   $(edgetpu-objs)
 
 

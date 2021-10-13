@@ -30,11 +30,15 @@
 #define EDGETPU_PSM1_START 0x1c2884
 #define EDGETPU_PSM1_STATUS 0x1c2888
 #define EDGETPU_LPM_CHANGE_TIMEOUT 30000
+#define EDGETPU_PSM0_GPOUT_WRT_LO 0x1c18a8
+#define EDGETPU_PSM0_GPOUT_WRT_HI 0x1c18ac
+#define EDGETPU_PSM0_DEBUGCFG 0x1c188c
+#define EDGETPU_PSM0_RECOVER_VAL 125888
 
 static void janeiro_lpm_down(struct edgetpu_dev *etdev)
 {
 	int timeout_cnt = 0;
-	u32 val;
+	u32 val, val1;
 
 	do {
 		/* Manually delay 20us per retry till LPM shutdown finished */
@@ -44,9 +48,22 @@ static void janeiro_lpm_down(struct edgetpu_dev *etdev)
 			break;
 		timeout_cnt++;
 	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
-	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
+	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT) {
 		// Log the issue then continue to perform the shutdown forcefully.
-		etdev_warn(etdev, "LPM shutdown failure, continuing BLK shutdown\n");
+		etdev_err(etdev, "LPM shutdown failure, attempt to recover\n");
+		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_PSM0_STATUS);
+		val1 = edgetpu_dev_read_32_sync(etdev, EDGETPU_PSM1_STATUS);
+		etdev_err(etdev, "PSM0_STATUS: 0x%x, PSM1_STATUS: 0x%x\n", val, val1);
+
+		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_GPOUT_WRT_LO,
+					  EDGETPU_PSM0_RECOVER_VAL);
+		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_GPOUT_WRT_HI, 0);
+		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_PSM0_DEBUGCFG);
+		// Write then clear EDGETPU_PSM0_DEBUGCFG[1] to update the value.
+		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_DEBUGCFG, 0x2 | val);
+		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_DEBUGCFG, 0x1 & val);
+		etdev_err(etdev, "Recovery attempt finish\n");
+	}
 }
 
 static int janeiro_lpm_up(struct edgetpu_dev *etdev)

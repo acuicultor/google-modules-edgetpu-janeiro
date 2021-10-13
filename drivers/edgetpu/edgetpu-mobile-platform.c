@@ -26,24 +26,27 @@
  * Log and trace buffers at the beginning of the remapped region,
  * pool memory afterwards.
  */
-#define EDGETPU_POOL_MEM_OFFSET (EDGETPU_TELEMETRY_BUFFER_SIZE * 2)
+#define EDGETPU_POOL_MEM_OFFSET (EDGETPU_TELEMETRY_BUFFER_SIZE * 2 * EDGETPU_NUM_CORES)
 
 static void get_telemetry_mem(struct edgetpu_mobile_platform_dev *etmdev,
 			      enum edgetpu_telemetry_type type, struct edgetpu_coherent_mem *mem)
 {
-	int offset = type == EDGETPU_TELEMETRY_TRACE ? EDGETPU_TELEMETRY_BUFFER_SIZE : 0;
+	int i, offset = type == EDGETPU_TELEMETRY_TRACE ? EDGETPU_TELEMETRY_BUFFER_SIZE : 0;
 
-	mem->vaddr = etmdev->shared_mem_vaddr + offset;
-	mem->dma_addr = EDGETPU_REMAPPED_DATA_ADDR + offset;
-	mem->tpu_addr = EDGETPU_REMAPPED_DATA_ADDR + offset;
-	mem->host_addr = 0;
-	mem->size = EDGETPU_TELEMETRY_BUFFER_SIZE;
+	for (i = 0; i < etmdev->edgetpu_dev.num_cores; i++) {
+		mem[i].vaddr = etmdev->shared_mem_vaddr + offset;
+		mem[i].dma_addr = EDGETPU_REMAPPED_DATA_ADDR + offset;
+		mem[i].tpu_addr = EDGETPU_REMAPPED_DATA_ADDR + offset;
+		mem[i].host_addr = 0;
+		mem[i].size = EDGETPU_TELEMETRY_BUFFER_SIZE;
+		offset += EDGETPU_TELEMETRY_BUFFER_SIZE * 2;
+	}
 }
 
 static void edgetpu_mobile_get_telemetry_mem(struct edgetpu_mobile_platform_dev *etmdev)
 {
-	get_telemetry_mem(etmdev, EDGETPU_TELEMETRY_LOG, &etmdev->log_mem);
-	get_telemetry_mem(etmdev, EDGETPU_TELEMETRY_TRACE, &etmdev->trace_mem);
+	get_telemetry_mem(etmdev, EDGETPU_TELEMETRY_LOG, etmdev->log_mem);
+	get_telemetry_mem(etmdev, EDGETPU_TELEMETRY_TRACE, etmdev->trace_mem);
 }
 
 static int edgetpu_platform_setup_fw_region(struct edgetpu_mobile_platform_dev *etmdev)
@@ -211,6 +214,7 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev,
 
 	platform_set_drvdata(pdev, etdev);
 	etdev->dev = dev;
+	etdev->num_cores = EDGETPU_NUM_CORES;
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (IS_ERR_OR_NULL(r)) {
@@ -277,8 +281,23 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev,
 	if (ret)
 		dev_warn(dev, "SSMT setup failed (%d). Context isolation not enforced", ret);
 
+	etmdev->log_mem = devm_kcalloc(dev, etdev->num_cores, sizeof(*etmdev->log_mem), GFP_KERNEL);
+	if (!etmdev->log_mem) {
+		ret = -ENOMEM;
+		goto out_remove_irq;
+	}
+
+#if IS_ENABLED(CONFIG_EDGETPU_TELEMETRY_TRACE)
+	etmdev->trace_mem =
+		devm_kcalloc(dev, etdev->num_cores, sizeof(*etmdev->log_mem), GFP_KERNEL);
+	if (!etmdev->trace_mem) {
+		ret = -ENOMEM;
+		goto out_remove_irq;
+	}
+#endif
+
 	edgetpu_mobile_get_telemetry_mem(etmdev);
-	ret = edgetpu_telemetry_init(etdev, &etmdev->log_mem, &etmdev->trace_mem);
+	ret = edgetpu_telemetry_init(etdev, etmdev->log_mem, etmdev->trace_mem);
 	if (ret)
 		goto out_remove_irq;
 
@@ -287,6 +306,9 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev,
 		dev_err(dev, "initialize firmware downloader failed: %d", ret);
 		goto out_tel_exit;
 	}
+
+	etdev_dbg(etdev, "Creating thermal device");
+	etdev->thermal = devm_tpu_thermal_create(etdev->dev, etdev);
 
 	if (etmdev->after_probe) {
 		ret = etmdev->after_probe(etmdev);

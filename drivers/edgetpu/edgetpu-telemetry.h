@@ -99,7 +99,7 @@ struct edgetpu_telemetry_ctx {
 /*
  * Allocates resources needed for @etdev->telemetry.
  *
- * Optionally provide coherent_mem buffers for log and trace.
+ * Optionally provide arrays of etdev->num_cores coherent_mem buffers for log and trace.
  * If any of these are NULL, they will be allocated and freed by telemetry code.
  *
  * Returns 0 on success, or a negative errno on error.
@@ -139,12 +139,11 @@ void edgetpu_telemetry_mappings_show(struct edgetpu_dev *etdev,
 				     struct seq_file *s);
 
 /* Map telemetry buffer into user space. */
-int edgetpu_mmap_telemetry_buffer(struct edgetpu_dev *etdev,
-				  enum edgetpu_telemetry_type type,
-				  struct vm_area_struct *vma);
-void edgetpu_telemetry_inc_mmap_count(struct edgetpu_dev *etdev,
-				      enum edgetpu_telemetry_type type);
-void edgetpu_telemetry_dec_mmap_count(struct edgetpu_dev *etdev,
-				      enum edgetpu_telemetry_type type);
+int edgetpu_mmap_telemetry_buffer(struct edgetpu_dev *etdev, enum edgetpu_telemetry_type type,
+				  struct vm_area_struct *vma, int core_id);
+void edgetpu_telemetry_inc_mmap_count(struct edgetpu_dev *etdev, enum edgetpu_telemetry_type type,
+				      int core_id);
+void edgetpu_telemetry_dec_mmap_count(struct edgetpu_dev *etdev, enum edgetpu_telemetry_type type,
+				      int core_id);
 
 #endif /* __EDGETPU_TELEMETRY_H__ */

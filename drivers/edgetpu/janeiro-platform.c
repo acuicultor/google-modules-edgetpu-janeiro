@@ -47,29 +47,64 @@ static int janeiro_mmu_set_shareability(struct device *dev, u32 reg_base)
 	return 0;
 }
 
-static int janeiro_parse_set_dt_property(struct device *dev)
+static int janeiro_set_fw_ctx_memory(struct edgetpu_mobile_platform_dev *etmdev)
+{
+	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
+	struct device *dev = etdev->dev;
+	struct resource r;
+	struct device_node *np;
+	int ret;
+
+	np = of_parse_phandle(dev->of_node, "memory-region", 1);
+	if (!np) {
+		etdev_warn(etdev, "No memory for firmware contexts");
+		return -ENODEV;
+	}
+
+	ret = of_address_to_resource(np, 0, &r);
+	of_node_put(np);
+	if (ret) {
+		etdev_warn(etdev, "No memory address for firmware contexts");
+		return ret;
+	}
+
+	etmdev->fw_ctx_paddr = r.start;
+	etmdev->fw_ctx_size = resource_size(&r);
+	return 0;
+}
+
+static int janeiro_parse_set_dt_property(struct edgetpu_mobile_platform_dev *etmdev)
 {
 	int ret;
 	u32 reg;
+	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
+	struct device *dev = etdev->dev;
 
-	if (!of_find_property(dev->of_node, "edgetpu,shareability", NULL))
-		return -ENODEV;
+	ret = janeiro_set_fw_ctx_memory(etmdev);
+	/*
+	 * TODO(b/202262532):
+	 * ignore return value till ctx switching support is added on
+	 * firmware.
+	 */
+
+	if (!of_find_property(dev->of_node, "edgetpu,shareability", NULL)) {
+		ret = -ENODEV;
+		goto err;
+	}
 	ret = of_property_read_u32_index(dev->of_node, "edgetpu,shareability", 0, &reg);
 	if (ret)
-		return ret;
-	return janeiro_mmu_set_shareability(dev, reg);
+		goto err;
+	ret = janeiro_mmu_set_shareability(dev, reg);
+err:
+	if (ret)
+		etdev_warn(etdev, "failed to enable shareability: %d", ret);
+
+	return 0;
 }
 
 static int janeiro_platform_after_probe(struct edgetpu_mobile_platform_dev *etmdev)
 {
-	int ret;
-	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
-
-	ret = janeiro_parse_set_dt_property(etdev->dev);
-	if (ret)
-		dev_warn(etdev->dev, "failed to enable shareability: %d", ret);
-
-	return 0;
+	return janeiro_parse_set_dt_property(etmdev);
 }
 
 static int edgetpu_platform_probe(struct platform_device *pdev)
