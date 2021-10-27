@@ -63,6 +63,7 @@ static int mobile_pwr_state_init(struct device *dev)
 	if (curr_state > TPU_OFF) {
 		ret = pm_runtime_get_sync(dev);
 		if (ret) {
+			pm_runtime_put_noidle(dev);
 			dev_err(dev, "pm_runtime_get_sync returned %d\n", ret);
 			return ret;
 		}
@@ -235,6 +236,7 @@ static int mobile_pwr_state_set_locked(struct edgetpu_mobile_platform_dev *etmde
 	if (curr_state == TPU_OFF && val > TPU_OFF) {
 		ret = pm_runtime_get_sync(dev);
 		if (ret) {
+			pm_runtime_put_noidle(dev);
 			dev_err(dev, "pm_runtime_get_sync returned %d\n", ret);
 			return ret;
 		}

@@ -26,20 +26,24 @@
  * Log and trace buffers at the beginning of the remapped region,
  * pool memory afterwards.
  */
-#define EDGETPU_POOL_MEM_OFFSET (EDGETPU_TELEMETRY_BUFFER_SIZE * 2 * EDGETPU_NUM_CORES)
+#define EDGETPU_POOL_MEM_OFFSET                                                                    \
+	((EDGETPU_TELEMETRY_LOG_BUFFER_SIZE + EDGETPU_TELEMETRY_TRACE_BUFFER_SIZE) *               \
+	 EDGETPU_NUM_CORES)
 
 static void get_telemetry_mem(struct edgetpu_mobile_platform_dev *etmdev,
 			      enum edgetpu_telemetry_type type, struct edgetpu_coherent_mem *mem)
 {
-	int i, offset = type == EDGETPU_TELEMETRY_TRACE ? EDGETPU_TELEMETRY_BUFFER_SIZE : 0;
+	int i, offset = type == EDGETPU_TELEMETRY_TRACE ? EDGETPU_TELEMETRY_LOG_BUFFER_SIZE : 0;
+	const size_t size = type == EDGETPU_TELEMETRY_LOG ? EDGETPU_TELEMETRY_LOG_BUFFER_SIZE :
+								EDGETPU_TELEMETRY_TRACE_BUFFER_SIZE;
 
 	for (i = 0; i < etmdev->edgetpu_dev.num_cores; i++) {
 		mem[i].vaddr = etmdev->shared_mem_vaddr + offset;
 		mem[i].dma_addr = EDGETPU_REMAPPED_DATA_ADDR + offset;
 		mem[i].tpu_addr = EDGETPU_REMAPPED_DATA_ADDR + offset;
 		mem[i].host_addr = 0;
-		mem[i].size = EDGETPU_TELEMETRY_BUFFER_SIZE;
-		offset += EDGETPU_TELEMETRY_BUFFER_SIZE * 2;
+		mem[i].size = size;
+		offset += EDGETPU_TELEMETRY_LOG_BUFFER_SIZE + EDGETPU_TELEMETRY_TRACE_BUFFER_SIZE;
 	}
 }
 

@@ -106,7 +106,7 @@ static void telemetry_unset_event(struct edgetpu_dev *etdev,
 static void copy_with_wrap(struct edgetpu_telemetry_header *header, void *dest,
 			   u32 length, u32 size, void *start)
 {
-	const u32 wrap_bit = EDGETPU_TELEMETRY_WRAP_BIT;
+	const u32 wrap_bit = size + sizeof(*header);
 	u32 remaining = 0;
 	u32 head = header->head & (wrap_bit - 1);
 
@@ -288,12 +288,10 @@ static int telemetry_mmap_buffer(struct edgetpu_dev *etdev,
 	return ret;
 }
 
-static int telemetry_init(struct edgetpu_dev *etdev,
-			  struct edgetpu_telemetry *tel, const char *name,
-			  struct edgetpu_coherent_mem *mem,
+static int telemetry_init(struct edgetpu_dev *etdev, struct edgetpu_telemetry *tel,
+			  const char *name, struct edgetpu_coherent_mem *mem, const size_t size,
 			  void (*fallback)(struct edgetpu_telemetry *))
 {
-	const size_t size = EDGETPU_TELEMETRY_BUFFER_SIZE;
 	const u32 flags = EDGETPU_MMU_DIE | EDGETPU_MMU_32 | EDGETPU_MMU_HOST;
 	void *vaddr;
 	dma_addr_t dma_addr;
@@ -383,12 +381,14 @@ int edgetpu_telemetry_init(struct edgetpu_dev *etdev,
 
 	for (i = 0; i < etdev->num_cores; i++) {
 		ret = telemetry_init(etdev, &etdev->telemetry[i].log, "telemetry_log",
-				     log_mem ? &log_mem[i] : NULL, edgetpu_fw_log);
+				     log_mem ? &log_mem[i] : NULL,
+				     EDGETPU_TELEMETRY_LOG_BUFFER_SIZE, edgetpu_fw_log);
 		if (ret)
 			break;
 #if IS_ENABLED(CONFIG_EDGETPU_TELEMETRY_TRACE)
 		ret = telemetry_init(etdev, &etdev->telemetry[i].trace, "telemetry_trace",
-				     trace_mem ? &trace_mem[i] : NULL, edgetpu_fw_trace);
+				     trace_mem ? &trace_mem[i] : NULL,
+				     EDGETPU_TELEMETRY_TRACE_BUFFER_SIZE, edgetpu_fw_trace);
 		if (ret)
 			break;
 #endif

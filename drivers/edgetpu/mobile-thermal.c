@@ -50,8 +50,7 @@ static int edgetpu_thermal_kci_if_powered(struct edgetpu_dev *etdev, enum edgetp
 	return ret;
 }
 
-static int edgetpu_get_max_state(struct thermal_cooling_device *cdev,
-				 unsigned long *state)
+static int edgetpu_get_max_state(struct thermal_cooling_device *cdev, unsigned long *state)
 {
 	struct edgetpu_thermal *thermal = cdev->devdata;
 
@@ -65,8 +64,7 @@ static int edgetpu_get_max_state(struct thermal_cooling_device *cdev,
 /*
  * Set cooling state.
  */
-static int edgetpu_set_cur_state(struct thermal_cooling_device *cdev,
-				 unsigned long state_original)
+static int edgetpu_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state_original)
 {
 	int ret;
 	struct edgetpu_thermal *cooling = cdev->devdata;
@@ -74,8 +72,7 @@ static int edgetpu_set_cur_state(struct thermal_cooling_device *cdev,
 	unsigned long pwr_state;
 
 	if (state_original >= cooling->tpu_num_states) {
-		dev_err(dev, "%s: invalid cooling state %lu\n", __func__,
-			state_original);
+		dev_err(dev, "%s: invalid cooling state %lu\n", __func__, state_original);
 		return -EINVAL;
 	}
 
@@ -83,62 +80,60 @@ static int edgetpu_set_cur_state(struct thermal_cooling_device *cdev,
 
 	mutex_lock(&cooling->lock);
 	pwr_state = state_pwr_map[state_original].state;
-	if (state_original != cooling->cooling_state) {
-		/*
-		 * Set the thermal policy through ACPM to allow cooling by DVFS. Any states lower
-		 * than UUD should be handled by firmware when it gets the throttling notification
-		 * KCI
-		 */
-		if (pwr_state < TPU_ACTIVE_UUD) {
-			dev_warn_ratelimited(
-				dev, "Setting lowest DVFS state, waiting for FW to shutdown TPU");
-			ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, TPU_ACTIVE_UUD);
-		} else {
-			ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, pwr_state);
-		}
-
-		if (ret) {
-			dev_err(dev, "error setting tpu policy: %d\n", ret);
-			goto out;
-		}
-		cooling->cooling_state = state_original;
-	} else {
+	if (state_original == cooling->cooling_state) {
 		ret = -EALREADY;
+		goto out;
 	}
 
+	/*
+	 * Set the thermal policy through ACPM to allow cooling by DVFS. Any states lower
+	 * than UUD should be handled by firmware when it gets the throttling notification
+	 * KCI
+	 */
+	if (pwr_state < TPU_ACTIVE_UUD) {
+		dev_warn_ratelimited(dev,
+				     "Setting lowest DVFS state, waiting for FW to shutdown TPU");
+		ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, TPU_ACTIVE_UUD);
+	} else {
+		ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, pwr_state);
+	}
+
+	if (ret) {
+		dev_err(dev, "error setting tpu policy: %d\n", ret);
+		goto out;
+	}
+	cooling->cooling_state = state_original;
 out:
 	mutex_unlock(&cooling->lock);
 	return ret;
 }
 
-static int edgetpu_get_cur_state(struct thermal_cooling_device *cdev,
-				 unsigned long *state)
+static int edgetpu_get_cur_state(struct thermal_cooling_device *cdev, unsigned long *state)
 {
 	int ret = 0;
 	struct edgetpu_thermal *cooling = cdev->devdata;
 
 	*state = cooling->cooling_state;
-	if (*state >= cooling->tpu_num_states) {
-		dev_warn(cooling->dev,
-			 "Unknown cooling state: %lu, resetting\n", *state);
-		mutex_lock(&cooling->lock);
+	if (*state < cooling->tpu_num_states)
+		return 0;
+
+	dev_warn(cooling->dev, "Unknown cooling state: %lu, resetting\n", *state);
+	mutex_lock(&cooling->lock);
 
 #if IS_ENABLED(CONFIG_ABROLHOS)
-		ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, TPU_ACTIVE_OD);
+	ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, TPU_ACTIVE_OD);
 #else
-		ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, TPU_ACTIVE_NOM);
+	ret = exynos_acpm_set_policy(TPU_ACPM_DOMAIN, TPU_ACTIVE_NOM);
 #endif /* IS_ENABLED(CONFIG_ABROLHOS) */
-		if (ret) {
-			dev_err(cooling->dev, "error setting tpu policy: %d\n",
-				ret);
-			mutex_unlock(&cooling->lock);
-			return ret;
-		}
-
-		//setting back to "no cooling"
-		cooling->cooling_state = 0;
+	if (ret) {
+		dev_err(cooling->dev, "error setting tpu policy: %d\n", ret);
 		mutex_unlock(&cooling->lock);
+		return ret;
 	}
+
+	/* setting back to "no cooling" */
+	cooling->cooling_state = 0;
+	mutex_unlock(&cooling->lock);
 
 	return 0;
 }
@@ -169,8 +164,7 @@ static int edgetpu_get_requested_power(struct thermal_cooling_device *cdev,
 	struct edgetpu_thermal *cooling = cdev->devdata;
 
 	state_original = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
-	return edgetpu_state2power_internal(state_original, power,
-					    cooling);
+	return edgetpu_state2power_internal(state_original, power, cooling);
 }
 
 static int edgetpu_state2power(struct thermal_cooling_device *cdev,
@@ -182,13 +176,11 @@ static int edgetpu_state2power(struct thermal_cooling_device *cdev,
 	struct edgetpu_thermal *cooling = cdev->devdata;
 
 	if (state >= cooling->tpu_num_states) {
-		dev_err(cooling->dev, "%s: invalid state: %lu\n", __func__,
-			state);
+		dev_err(cooling->dev, "%s: invalid state: %lu\n", __func__, state);
 		return -EINVAL;
 	}
 
-	return edgetpu_state2power_internal(state_pwr_map[state].state, power,
-					    cooling);
+	return edgetpu_state2power_internal(state_pwr_map[state].state, power, cooling);
 }
 
 static int edgetpu_power2state(struct thermal_cooling_device *cdev,
@@ -255,8 +247,8 @@ static int tpu_thermal_parse_dvfs_table(struct edgetpu_thermal *thermal)
 	int row_size, col_size, tbl_size, i;
 	int of_data_int_array[OF_DATA_NUM_MAX];
 
-	if (of_property_read_u32_array(thermal->dev->of_node,
-				"tpu_dvfs_table_size", of_data_int_array, 2))
+	if (of_property_read_u32_array(thermal->dev->of_node, "tpu_dvfs_table_size",
+				       of_data_int_array, 2))
 		goto error;
 
 	row_size = of_data_int_array[0];
@@ -270,8 +262,8 @@ static int tpu_thermal_parse_dvfs_table(struct edgetpu_thermal *thermal)
 	if (tbl_size > OF_DATA_NUM_MAX)
 		goto error;
 
-	if (of_property_read_u32_array(thermal->dev->of_node,
-				"tpu_dvfs_table", of_data_int_array, tbl_size))
+	if (of_property_read_u32_array(thermal->dev->of_node, "tpu_dvfs_table", of_data_int_array,
+				       tbl_size))
 		goto error;
 
 	thermal->tpu_num_states = row_size;
@@ -289,8 +281,7 @@ error:
 	return -EINVAL;
 }
 
-static ssize_t
-user_vote_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t user_vote_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_cooling_device *cdev =
 		container_of(dev, struct thermal_cooling_device, device);
@@ -325,7 +316,12 @@ static ssize_t user_vote_store(struct device *dev, struct device_attribute *attr
 	cooling->sysfs_req = state;
 	cdev->updated = false;
 	mutex_unlock(&cdev->lock);
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0)
 	thermal_cdev_update(cdev);
+#elif IS_ENABLED(CONFIG_THERMAL)
+	dev_err(dev, "Thermal update not implemented");
+#endif
 
 	return count;
 }
@@ -347,8 +343,7 @@ static int tpu_pause_callback(enum thermal_pause_state action, void *dev)
 	return ret;
 }
 
-static int
-tpu_thermal_cooling_register(struct edgetpu_thermal *thermal, char *type)
+static int tpu_thermal_cooling_register(struct edgetpu_thermal *thermal, char *type)
 {
 	struct device_node *cooling_node = NULL;
 	int err = 0;
@@ -364,10 +359,10 @@ tpu_thermal_cooling_register(struct edgetpu_thermal *thermal, char *type)
 	cooling_node = of_find_node_by_name(NULL, "tpu-cooling");
 	if (!cooling_node)
 		dev_warn(thermal->dev, "failed to find cooling node\n");
-	// Initialize the cooling state as 0, means "no cooling"
+	/* Initialize the cooling state as 0, means "no cooling" */
 	thermal->cooling_state = 0;
-	thermal->cdev = thermal_of_cooling_device_register(
-		cooling_node, type, thermal, &edgetpu_cooling_ops);
+	thermal->cdev = thermal_of_cooling_device_register(cooling_node, type, thermal,
+							   &edgetpu_cooling_ops);
 	if (IS_ERR(thermal->cdev))
 		return PTR_ERR(thermal->cdev);
 
@@ -379,11 +374,11 @@ static int tpu_thermal_init(struct edgetpu_thermal *thermal, struct device *dev)
 	int err;
 	struct dentry *d;
 
+	thermal->dev = dev;
 	d = debugfs_create_dir("cooling", edgetpu_fs_debugfs_dir());
 	/* don't let debugfs creation failure abort the init procedure */
 	if (IS_ERR_OR_NULL(d))
 		dev_warn(dev, "failed to create debug fs for cooling");
-	thermal->dev = dev;
 	thermal->cooling_root = d;
 
 	err = tpu_thermal_cooling_register(thermal, EDGETPU_COOLING_NAME);
@@ -398,14 +393,12 @@ static int tpu_thermal_init(struct edgetpu_thermal *thermal, struct device *dev)
 	return 0;
 }
 
-struct edgetpu_thermal
-*devm_tpu_thermal_create(struct device *dev, struct edgetpu_dev *etdev)
+struct edgetpu_thermal *devm_tpu_thermal_create(struct device *dev, struct edgetpu_dev *etdev)
 {
 	struct edgetpu_thermal *thermal;
 	int err;
 
-	thermal = devres_alloc(devm_tpu_thermal_release, sizeof(*thermal),
-			       GFP_KERNEL);
+	thermal = devres_alloc(devm_tpu_thermal_release, sizeof(*thermal), GFP_KERNEL);
 	if (!thermal)
 		return ERR_PTR(-ENOMEM);
 

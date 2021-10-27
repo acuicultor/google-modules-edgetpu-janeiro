@@ -27,9 +27,9 @@
 
 #define EDGETPU_FW_DMESG_LOG_LEVEL (EDGETPU_FW_LOG_LEVEL_ERROR)
 
-#define EDGETPU_TELEMETRY_BUFFER_SIZE (16 * 4096)
-/* assumes buffer size is power of 2 */
-#define EDGETPU_TELEMETRY_WRAP_BIT EDGETPU_TELEMETRY_BUFFER_SIZE
+/* Buffer size must be a power of 2 */
+#define EDGETPU_TELEMETRY_LOG_BUFFER_SIZE (16 * 4096)
+#define EDGETPU_TELEMETRY_TRACE_BUFFER_SIZE (64 * 4096)
 
 enum edgetpu_telemetry_state {
 	EDGETPU_TELEMETRY_DISABLED = 0,

@@ -60,7 +60,7 @@ static int mobile_firmware_setup_mappings(struct edgetpu_dev *etdev,
 		size = CONFIG_TO_SIZE(image_config->mappings[i].image_config_value);
 		phys_addr = image_config->mappings[i].image_config_value & ~(0xFFF);
 
-		etdev_dbg(etdev, "Adding IOMMU mapping for firmware : %llu -> %08llX", tpu_addr,
+		etdev_dbg(etdev, "Adding IOMMU mapping for firmware : %#llx -> %#llx", tpu_addr,
 			  phys_addr);
 
 		ret = edgetpu_mmu_add_translation(etdev, tpu_addr, phys_addr, size,

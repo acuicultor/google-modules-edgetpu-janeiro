@@ -1046,13 +1046,11 @@ int edgetpu_kci_notify_throttling(struct edgetpu_dev *etdev, u32 level)
 			.flags = level,
 		},
 	};
-	int ret;
 
 	if (!etdev->kci)
 		return -ENODEV;
 
-	ret =  edgetpu_kci_send_cmd(etdev->kci, &cmd);
-	return ret;
+	return edgetpu_kci_send_cmd(etdev->kci, &cmd);
 }
 
 
@@ -1064,11 +1062,9 @@ int edgetpu_kci_block_bus_speed_control(struct edgetpu_dev *etdev, bool block)
 			.flags = (u32) block,
 		},
 	};
-	int ret;
 
 	if (!etdev->kci)
 		return -ENODEV;
 
-	ret =  edgetpu_kci_send_cmd(etdev->kci, &cmd);
-	return ret;
+	return edgetpu_kci_send_cmd(etdev->kci, &cmd);
 }

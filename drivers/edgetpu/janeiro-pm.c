@@ -13,7 +13,7 @@
 #include "edgetpu-mobile-platform.h"
 #include "mobile-pm.h"
 
-#define TPU_DEFAULT_POWER_STATE		TPU_ACTIVE_NOM
+#define TPU_DEFAULT_POWER_STATE		TPU_ACTIVE_UUD
 
 #include "mobile-pm.c"
 
@@ -49,17 +49,17 @@ static void janeiro_lpm_down(struct edgetpu_dev *etdev)
 		timeout_cnt++;
 	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
 	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT) {
-		// Log the issue then continue to perform the shutdown forcefully.
+		/* Log the issue then continue to perform the shutdown forcefully. */
 		etdev_err(etdev, "LPM shutdown failure, attempt to recover\n");
 		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_PSM0_STATUS);
 		val1 = edgetpu_dev_read_32_sync(etdev, EDGETPU_PSM1_STATUS);
-		etdev_err(etdev, "PSM0_STATUS: 0x%x, PSM1_STATUS: 0x%x\n", val, val1);
+		etdev_err(etdev, "PSM0_STATUS: %#x, PSM1_STATUS: %#x\n", val, val1);
 
 		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_GPOUT_WRT_LO,
 					  EDGETPU_PSM0_RECOVER_VAL);
 		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_GPOUT_WRT_HI, 0);
 		val = edgetpu_dev_read_32_sync(etdev, EDGETPU_PSM0_DEBUGCFG);
-		// Write then clear EDGETPU_PSM0_DEBUGCFG[1] to update the value.
+		/* Write then clear EDGETPU_PSM0_DEBUGCFG[1] to update the value. */
 		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_DEBUGCFG, 0x2 | val);
 		edgetpu_dev_write_32_sync(etdev, EDGETPU_PSM0_DEBUGCFG, 0x1 & val);
 		etdev_err(etdev, "Recovery attempt finish\n");
