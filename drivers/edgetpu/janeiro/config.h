@@ -24,6 +24,9 @@
 #define EDGETPU_FEATURE_MOBILE
 #define EDGETPU_HAS_WAKELOCK
 
+/* Is able to support external workloads */
+#define EDGETPU_FEATURE_INTEROP
+
 /*
  * The TPU VA where the firmware is located.
  *

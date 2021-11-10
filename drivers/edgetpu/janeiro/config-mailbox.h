@@ -21,7 +21,11 @@
  * ---------------------------------------------------------------
  * | KCI X 1 |   VII(s) X 7  | EXT_DSP(s) X 4  | EXT_AOC(s) X 1  |
  * ---------------------------------------------------------------
+ * The TZ mailbox is not managed by the kernel, but we still need to tell firmware to enable it,
+ * so it's index is placed after the kernel managed mailboxes.
  */
+#define EDGETPU_TZ_MAILBOX_ID	13
+
 #define JANEIRO_EXT_DSP_MAILBOX_START (EDGETPU_NUM_VII_MAILBOXES + 1)
 #define JANEIRO_EXT_DSP_MAILBOX_END \
 			(EDGETPU_NUM_EXT_DSP_MAILBOXES + JANEIRO_EXT_DSP_MAILBOX_START - 1)

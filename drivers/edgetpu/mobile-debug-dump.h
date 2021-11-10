@@ -43,7 +43,7 @@ mobile_sscd_collect_mappings_segment(struct edgetpu_device_group **groups, size_
  *
  * Returns the total number of queues collected since some queues may have been released for groups
  * with detached mailboxes. The return value is less than or equal to the total number of queues
- * expected based on @num_groups i.e (2 * @num_groups +2).
+ * expected based on @num_groups i.e. (2 * @num_groups +2).
  */
 size_t mobile_sscd_collect_cmd_resp_queues(struct edgetpu_dev *etdev,
 					   struct edgetpu_device_group **groups, size_t num_groups,

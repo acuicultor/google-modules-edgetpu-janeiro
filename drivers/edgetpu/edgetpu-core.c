@@ -50,6 +50,9 @@ enum edgetpu_vma_type {
 	VMA_VII_CSR,
 	VMA_VII_CMDQ,
 	VMA_VII_RESPQ,
+	VMA_EXT_CSR,
+	VMA_EXT_CMDQ,
+	VMA_EXT_RESPQ,
 	/* For VMA_LOG and VMA_TRACE, core id is stored in bits higher than VMA_TYPE_WIDTH. */
 	VMA_LOG,
 	VMA_TRACE,
@@ -103,6 +106,14 @@ static edgetpu_vma_flags_t mmap_vma_flag(unsigned long pgoff)
 		return VMA_VII_CMDQ;
 	case EDGETPU_MMAP_RESP_QUEUE_OFFSET:
 		return VMA_VII_RESPQ;
+#ifdef EDGETPU_FEATURE_INTEROP
+	case EDGETPU_MMAP_EXT_CSR_OFFSET:
+		return VMA_EXT_CSR;
+	case EDGETPU_MMAP_EXT_CMD_QUEUE_OFFSET:
+		return VMA_EXT_CMDQ;
+	case EDGETPU_MMAP_EXT_RESP_QUEUE_OFFSET:
+		return VMA_EXT_RESPQ;
+#endif /* EDGETPU_FEATURE_INTEROP */
 	case EDGETPU_MMAP_LOG_BUFFER_OFFSET:
 		return VMA_DATA_SET(VMA_LOG, 0);
 	case EDGETPU_MMAP_TRACE_BUFFER_OFFSET:
@@ -133,6 +144,12 @@ vma_type_to_wakelock_event(enum edgetpu_vma_type type)
 	case VMA_VII_CMDQ:
 		return EDGETPU_WAKELOCK_EVENT_CMD_QUEUE;
 	case VMA_VII_RESPQ:
+		return EDGETPU_WAKELOCK_EVENT_RESP_QUEUE;
+	case VMA_EXT_CSR:
+		return EDGETPU_WAKELOCK_EVENT_MBOX_CSR;
+	case VMA_EXT_CMDQ:
+		return EDGETPU_WAKELOCK_EVENT_CMD_QUEUE;
+	case VMA_EXT_RESPQ:
 		return EDGETPU_WAKELOCK_EVENT_RESP_QUEUE;
 	default:
 		return EDGETPU_WAKELOCK_EVENT_END;
@@ -313,14 +330,22 @@ int edgetpu_mmap(struct edgetpu_client *client, struct vm_area_struct *vma)
 	}
 	switch (type) {
 	case VMA_VII_CSR:
-		ret = edgetpu_mmap_csr(client->group, vma);
+		ret = edgetpu_mmap_csr(client->group, vma, false);
 		break;
 	case VMA_VII_CMDQ:
-		ret = edgetpu_mmap_queue(client->group, MAILBOX_CMD_QUEUE, vma);
+		ret = edgetpu_mmap_queue(client->group, MAILBOX_CMD_QUEUE, vma, false);
 		break;
 	case VMA_VII_RESPQ:
-		ret = edgetpu_mmap_queue(client->group, MAILBOX_RESP_QUEUE,
-					 vma);
+		ret = edgetpu_mmap_queue(client->group, MAILBOX_RESP_QUEUE, vma, false);
+		break;
+	case VMA_EXT_CSR:
+		ret = edgetpu_mmap_csr(client->group, vma, true);
+		break;
+	case VMA_EXT_CMDQ:
+		ret = edgetpu_mmap_queue(client->group, MAILBOX_CMD_QUEUE, vma, true);
+		break;
+	case VMA_EXT_RESPQ:
+		ret = edgetpu_mmap_queue(client->group, MAILBOX_RESP_QUEUE, vma, true);
 		break;
 	default: /* to appease compiler */
 		break;

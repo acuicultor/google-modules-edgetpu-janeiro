@@ -99,6 +99,15 @@ int edgetpu_mcp_each(bool stop_on_err, void *data,
 		     int (*callback)(struct edgetpu_mcp *, void *));
 
 /*
+ * Invoke @callback on each device for the specified @mcp.
+ *
+ * @data can be any value, it will be directly passed to @callback.
+ */
+void edgetpu_mcp_foreach_etdev(struct edgetpu_mcp *mcp,
+			       void (*callback)(struct edgetpu_dev *, void *),
+			       void *data);
+
+/*
  * Returns the MCP object @etdev belongs to.
  *
  * Returns NULL when such object is not found.

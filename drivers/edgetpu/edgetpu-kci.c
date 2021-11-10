@@ -507,6 +507,8 @@ int edgetpu_kci_init(struct edgetpu_mailbox_manager *mgr,
 int edgetpu_kci_reinit(struct edgetpu_kci *kci)
 {
 	struct edgetpu_mailbox *mailbox = kci->mailbox;
+	struct edgetpu_mailbox_manager *mgr;
+	unsigned long flags;
 	int ret;
 
 	if (!mailbox)
@@ -521,6 +523,13 @@ int edgetpu_kci_reinit(struct edgetpu_kci *kci)
 					QUEUE_SIZE);
 	if (ret)
 		return ret;
+
+	mgr = mailbox->etdev->mailbox_manager;
+	/* Restore KCI irq handler */
+	write_lock_irqsave(&mgr->mailboxes_lock, flags);
+	mailbox->handle_irq = edgetpu_kci_handle_irq;
+	write_unlock_irqrestore(&mgr->mailboxes_lock, flags);
+
 	edgetpu_mailbox_init_doorbells(mailbox);
 	edgetpu_mailbox_enable(mailbox);
 
@@ -529,6 +538,16 @@ int edgetpu_kci_reinit(struct edgetpu_kci *kci)
 
 void edgetpu_kci_cancel_work_queues(struct edgetpu_kci *kci)
 {
+	struct edgetpu_mailbox_manager *mgr;
+	unsigned long flags;
+
+	if (kci->mailbox) {
+		mgr = kci->mailbox->etdev->mailbox_manager;
+		/* Remove IRQ handler to stop responding to interrupts */
+		write_lock_irqsave(&mgr->mailboxes_lock, flags);
+		kci->mailbox->handle_irq = NULL;
+		write_unlock_irqrestore(&mgr->mailboxes_lock, flags);
+	}
 	/* Cancel workers that may send KCIs. */
 	cancel_work_sync(&kci->usage_work);
 	/* Cancel KCI and reverse KCI workers. */

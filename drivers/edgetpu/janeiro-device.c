@@ -15,14 +15,6 @@
 #include "edgetpu-telemetry.h"
 #include "mobile-pm.h"
 
-#define SSMT_NS_READ_STREAM_VID_OFFSET(n) (0x1000u + (0x4u * (n)))
-#define SSMT_NS_WRITE_STREAM_VID_OFFSET(n) (0x1200u + (0x4u * (n)))
-
-#define SSMT_NS_READ_STREAM_VID_REG(base, n)                                   \
-	((base) + SSMT_NS_READ_STREAM_VID_OFFSET(n))
-#define SSMT_NS_WRITE_STREAM_VID_REG(base, n)                                  \
-	((base) + SSMT_NS_WRITE_STREAM_VID_OFFSET(n))
-
 static irqreturn_t janeiro_mailbox_handle_irq(struct edgetpu_dev *etdev,
 					      int irq)
 {
@@ -69,21 +61,6 @@ u64 edgetpu_chip_tpu_timestamp(struct edgetpu_dev *etdev)
 
 void edgetpu_chip_init(struct edgetpu_dev *etdev)
 {
-	int i;
-	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
-
-	/*
-	 * This only works if the SSMT is set to client-driven mode, which only GSA can do.
-	 * Skip if GSA is not available
-	 */
-	if (!etmdev->ssmt_base || !etmdev->gsa_dev)
-		return;
-
-	/* Setup non-secure SCIDs, assume VID = SCID */
-	for (i = 0; i < EDGETPU_NCONTEXTS; i++) {
-		writel(i, SSMT_NS_READ_STREAM_VID_REG(etmdev->ssmt_base, i));
-		writel(i, SSMT_NS_WRITE_STREAM_VID_REG(etmdev->ssmt_base, i));
-	}
 }
 
 void edgetpu_chip_exit(struct edgetpu_dev *etdev)
@@ -125,20 +102,4 @@ int edgetpu_chip_get_ext_mailbox_index(u32 mbox_type, u32 *start, u32 *end)
 	default:
 		return -ENOENT;
 	}
-}
-
-int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
-				     struct edgetpu_ext_mailbox_ioctl *args)
-{
-	return -ENODEV;
-}
-
-int edgetpu_chip_release_ext_mailbox(struct edgetpu_client *client,
-				     struct edgetpu_ext_mailbox_ioctl *args)
-{
-	return -ENODEV;
-}
-
-void edgetpu_chip_client_remove(struct edgetpu_client *client)
-{
 }

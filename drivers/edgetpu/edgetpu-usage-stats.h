@@ -72,8 +72,10 @@ enum edgetpu_usage_counter_type {
 	EDGETPU_COUNTER_PARAM_CACHE_MISSES = 5,
 	/* Number of times a context got preempted by another. */
 	EDGETPU_COUNTER_CONTEXT_PREEMPTS = 6,
+	/* Number of times a hardware preemption occurred. */
+	EDGETPU_COUNTER_HARDWARE_PREEMPTS = 7,
 
-	EDGETPU_COUNTER_COUNT = 7, /* number of counters above */
+	EDGETPU_COUNTER_COUNT = 8, /* number of counters above */
 };
 
 /* Generic counter. Only reported if it has a value larger than 0. */

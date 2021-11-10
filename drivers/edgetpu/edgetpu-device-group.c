@@ -7,6 +7,7 @@
 
 #include <linux/atomic.h>
 #include <linux/bitops.h>
+#include <linux/cred.h>
 #include <linux/dma-direction.h>
 #include <linux/dma-mapping.h>
 #include <linux/eventfd.h>
@@ -20,6 +21,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/uidgid.h>
 
 #include "edgetpu-async.h"
 #include "edgetpu-config.h"
@@ -102,7 +104,7 @@ static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
 	struct edgetpu_dev *etdev = edgetpu_device_group_nth_etdev(group, i);
 
 	etdev_dbg(etdev, "%s: leave group %u", __func__, group->workload_id);
-	edgetpu_kci_update_usage_async(etdev);
+	edgetpu_kci_update_usage(etdev);
 	edgetpu_kci_leave_group(etdev->kci);
 	return 0;
 }
@@ -1672,11 +1674,14 @@ void edgetpu_group_mappings_show(struct edgetpu_device_group *group,
 }
 
 int edgetpu_mmap_csr(struct edgetpu_device_group *group,
-		     struct vm_area_struct *vma)
+		     struct vm_area_struct *vma, bool is_external)
 {
 	struct edgetpu_dev *etdev = group->etdev;
 	int ret = 0;
 	ulong phys_base, vma_size, map_size;
+
+	if (is_external && !uid_eq(current_euid(), GLOBAL_ROOT_UID))
+		return -EPERM;
 
 	mutex_lock(&group->lock);
 	if (!edgetpu_group_finalized_and_attached(group)) {
@@ -1684,9 +1689,18 @@ int edgetpu_mmap_csr(struct edgetpu_device_group *group,
 		goto out;
 	}
 
+	if (is_external && (!group->ext_mailbox || !group->ext_mailbox->descriptors)) {
+		ret = -ENOENT;
+		goto out;
+	}
+
 	vma_size = vma->vm_end - vma->vm_start;
 	map_size = min(vma_size, USERSPACE_CSR_SIZE);
-	phys_base = etdev->regs.phys + group->vii.mailbox->cmd_queue_csr_base;
+	if (is_external)
+		phys_base = etdev->regs.phys +
+			    group->ext_mailbox->descriptors[0].mailbox->cmd_queue_csr_base;
+	else
+		phys_base = etdev->regs.phys + group->vii.mailbox->cmd_queue_csr_base;
 	ret = io_remap_pfn_range(vma, vma->vm_start, phys_base >> PAGE_SHIFT,
 				 map_size, vma->vm_page_prot);
 	if (ret)
@@ -1699,11 +1713,14 @@ out:
 
 int edgetpu_mmap_queue(struct edgetpu_device_group *group,
 		       enum mailbox_queue_type type,
-		       struct vm_area_struct *vma)
+		       struct vm_area_struct *vma, bool is_external)
 {
 	struct edgetpu_dev *etdev = group->etdev;
 	int ret = 0;
 	edgetpu_queue_mem *queue_mem;
+
+	if (is_external && !uid_eq(current_euid(), GLOBAL_ROOT_UID))
+		return -EPERM;
 
 	mutex_lock(&group->lock);
 	if (!edgetpu_group_finalized_and_attached(group)) {
@@ -1711,10 +1728,22 @@ int edgetpu_mmap_queue(struct edgetpu_device_group *group,
 		goto out;
 	}
 
-	if (type == MAILBOX_CMD_QUEUE)
-		queue_mem = &(group->vii.cmd_queue_mem);
-	else
-		queue_mem = &(group->vii.resp_queue_mem);
+	if (is_external && (!group->ext_mailbox || !group->ext_mailbox->descriptors)) {
+		ret = -ENOENT;
+		goto out;
+	}
+
+	if (type == MAILBOX_CMD_QUEUE) {
+		if (is_external)
+			queue_mem = &(group->ext_mailbox->descriptors[0].cmd_queue_mem);
+		else
+			queue_mem = &(group->vii.cmd_queue_mem);
+	} else {
+		if (is_external)
+			queue_mem = &(group->ext_mailbox->descriptors[0].resp_queue_mem);
+		else
+			queue_mem = &(group->vii.resp_queue_mem);
+	}
 
 	if (!queue_mem->vaddr) {
 		ret = -ENXIO;

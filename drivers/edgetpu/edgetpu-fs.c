@@ -6,7 +6,9 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/bitops.h>
 #include <linux/cdev.h>
+#include <linux/cred.h>
 #include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/file.h>
@@ -25,6 +27,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include <linux/uidgid.h>
 
 #include "edgetpu-config.h"
 #include "edgetpu-device-group.h"
@@ -38,6 +41,10 @@
 #include "edgetpu-telemetry.h"
 #include "edgetpu-wakelock.h"
 #include "edgetpu.h"
+
+#ifdef EDGETPU_FEATURE_INTEROP
+#include <soc/google/tpu-ext.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/edgetpu.h>
@@ -685,6 +692,40 @@ static int edgetpu_ioctl_get_fatal_errors(struct edgetpu_client *client,
 	return ret;
 }
 
+#ifdef EDGETPU_FEATURE_INTEROP
+static int edgetpu_ioctl_test_external(struct edgetpu_client *client,
+				       struct edgetpu_test_ext_ioctl __user *argp)
+{
+	int ret = 0;
+	struct edgetpu_test_ext_ioctl test_ext;
+	struct edgetpu_ext_client_info client_info;
+	struct edgetpu_ext_mailbox_info *info;
+
+	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID))
+		return -EPERM;
+
+	if (copy_from_user(&test_ext, argp, sizeof(test_ext)))
+		return -EFAULT;
+
+	if (hweight32(test_ext.mbox_bmap) > 1)
+		return -EINVAL;
+
+	client_info.attr = (struct edgetpu_mailbox_attr __user *)test_ext.attrs;
+	client_info.tpu_fd = test_ext.fd;
+	client_info.mbox_map = test_ext.mbox_bmap;
+
+	info = kmalloc(sizeof(*info) + sizeof(struct edgetpu_ext_mailbox_descriptor *), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	ret = edgetpu_ext_driver_cmd(client->etdev->dev, test_ext.client_type, test_ext.cmd,
+				     &client_info, info);
+
+	kfree(info);
+	return ret;
+}
+#endif /* EDGETPU_FEATURE_INTEROP */
+
 long edgetpu_ioctl(struct file *file, uint cmd, ulong arg)
 {
 	struct edgetpu_client *client = file->private_data;
@@ -776,7 +817,11 @@ long edgetpu_ioctl(struct file *file, uint cmd, ulong arg)
 	case EDGETPU_GET_FATAL_ERRORS:
 		ret = edgetpu_ioctl_get_fatal_errors(client, argp);
 		break;
-
+#ifdef EDGETPU_FEATURE_INTEROP
+	case EDGETPU_TEST_EXTERNAL:
+		ret = edgetpu_ioctl_test_external(client, argp);
+		break;
+#endif /* EDGETPU_FEATURE_INTEROP */
 	default:
 		return -ENOTTY; /* unknown command */
 	}

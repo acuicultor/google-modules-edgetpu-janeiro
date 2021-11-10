@@ -549,6 +549,27 @@ static ssize_t context_preempt_count_store(struct device *dev,
 static DEVICE_ATTR(context_preempt_count, 0664, context_preempt_count_show,
 		   context_preempt_count_store);
 
+static ssize_t hardware_preempt_count_show(struct device *dev, struct device_attribute *attr,
+					   char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_counter(etdev, EDGETPU_COUNTER_HARDWARE_PREEMPTS);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t hardware_preempt_count_store(struct device *dev, struct device_attribute *attr,
+					    const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+
+	edgetpu_counter_clear(etdev, EDGETPU_COUNTER_HARDWARE_PREEMPTS);
+	return count;
+}
+static DEVICE_ATTR(hardware_preempt_count, 0664, hardware_preempt_count_show,
+		   hardware_preempt_count_store);
+
 static ssize_t outstanding_commands_max_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -659,6 +680,7 @@ static struct attribute *usage_stats_dev_attrs[] = {
 	&dev_attr_param_cache_hit_count.attr,
 	&dev_attr_param_cache_miss_count.attr,
 	&dev_attr_context_preempt_count.attr,
+	&dev_attr_hardware_preempt_count.attr,
 	&dev_attr_outstanding_commands_max.attr,
 	&dev_attr_preempt_depth_max.attr,
 	&dev_attr_fw_thread_stats.attr,
