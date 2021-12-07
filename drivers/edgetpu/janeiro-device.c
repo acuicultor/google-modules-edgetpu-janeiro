@@ -9,6 +9,7 @@
 #include <linux/uaccess.h>
 
 #include "edgetpu-config.h"
+#include "edgetpu-debug-dump.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-mobile-platform.h"
@@ -51,6 +52,7 @@ irqreturn_t edgetpu_chip_irq_handler(int irq, void *arg)
 	struct edgetpu_dev *etdev = arg;
 
 	edgetpu_telemetry_irq_handler(etdev);
+	edgetpu_debug_dump_resp_handler(etdev);
 	return janeiro_mailbox_handle_irq(etdev, irq);
 }
 

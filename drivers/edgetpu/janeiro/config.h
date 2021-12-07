@@ -58,6 +58,13 @@
 /* Address from which the TPU CPU can access data in the remapped region */
 #define EDGETPU_REMAPPED_DATA_ADDR                                        \
 	(EDGETPU_INSTRUCTION_REMAP_BASE + EDGETPU_REMAPPED_DATA_OFFSET)
+
+/*
+ * Size of memory for FW accessible debug dump segments
+ * TODO(b/208758697): verify whether this size is good
+ */
+#define EDGETPU_DEBUG_DUMP_MEM_SIZE 0x4E0000
+
 #include "config-mailbox.h"
 #include "config-pwr-state.h"
 #include "config-tpu-cpu.h"
