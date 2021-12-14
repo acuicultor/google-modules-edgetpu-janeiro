@@ -558,8 +558,10 @@ void edgetpu_client_put(struct edgetpu_client *client)
 {
 	if (!client)
 		return;
-	if (refcount_dec_and_test(&client->count))
+	if (refcount_dec_and_test(&client->count)) {
+		edgetpu_wakelock_free(client->wakelock);
 		kfree(client);
+	}
 }
 
 void edgetpu_client_remove(struct edgetpu_client *client)
@@ -594,13 +596,6 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 		edgetpu_device_group_leave(client);
 	/* invoke chip-dependent removal handler before releasing resources */
 	edgetpu_chip_client_remove(client);
-	edgetpu_wakelock_free(client->wakelock);
-	/*
-	 * It should be impossible to access client->wakelock after this cleanup
-	 * procedure. Set to NULL to cause kernel panic if use-after-free does
-	 * happen.
-	 */
-	client->wakelock = NULL;
 
 	/* Clean up all the per die event fds registered by the client */
 	if (client->perdie_events &

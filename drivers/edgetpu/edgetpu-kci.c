@@ -1005,13 +1005,14 @@ int edgetpu_kci_shutdown(struct edgetpu_kci *kci)
 }
 
 int edgetpu_kci_get_debug_dump(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
-			       size_t size)
+			       size_t size, bool init_buffer)
 {
 	struct edgetpu_command_element cmd = {
 		.code = KCI_CODE_GET_DEBUG_DUMP,
 		.dma = {
 			.address = tpu_addr,
 			.size = size,
+			.flags = init_buffer,
 		},
 	};
 
