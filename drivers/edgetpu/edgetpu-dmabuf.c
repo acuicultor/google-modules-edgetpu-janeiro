@@ -723,7 +723,7 @@ int edgetpu_map_dmabuf(struct edgetpu_device_group *group,
 			  __func__, ret);
 		goto err_release_map;
 	}
-	arg->device_address = dmap->map.device_address;
+	arg->device_address = tpu_addr;
 	mutex_unlock(&group->lock);
 	dma_buf_put(dmabuf);
 	return 0;

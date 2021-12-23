@@ -3,8 +3,10 @@
  * Module that defines structures and functions to retrieve debug dump segments
  * from edgetpu firmware.
  *
- * Copyright (C) 2020 Google, Inc.
+ * Copyright (C) 2020-2021 Google LLC
  */
+
+#include <linux/debugfs.h>
 #include <linux/workqueue.h>
 
 #include "edgetpu-config.h"
@@ -12,6 +14,36 @@
 #include "edgetpu-device-group.h"
 #include "edgetpu-iremap-pool.h"
 #include "edgetpu-kci.h"
+#include "edgetpu-pm.h"
+
+static int edgetpu_get_debug_dump_set(void *data, u64 val)
+{
+	struct edgetpu_dev *etdev = data;
+	int ret = edgetpu_pm_get(etdev->pm);
+
+	if (ret)
+		return ret;
+	ret = edgetpu_get_debug_dump(etdev, val);
+	if (ret > 0) {
+		etdev_warn(etdev, "FW refused debug dump request: %d", ret);
+		ret = -EOPNOTSUPP;
+	}
+	edgetpu_pm_put(etdev->pm);
+	return ret;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_get_debug_dump, NULL, edgetpu_get_debug_dump_set, "%llu\n");
+
+/*
+ * Creates debugFS entries for interacting with debug dump functions.
+ *
+ * This is expected to be called by edgetpu_debug_dump_init().
+ */
+static inline void edgetpu_setup_debug_dump_fs(struct edgetpu_dev *etdev)
+{
+	/* forwards write requests to edgetpu_get_debug_dump() */
+	debugfs_create_file("get_debug_dump", 0220, etdev->d_entry, etdev, &fops_get_debug_dump);
+}
 
 int edgetpu_get_debug_dump(struct edgetpu_dev *etdev, u64 type)
 {
@@ -23,6 +55,10 @@ int edgetpu_get_debug_dump(struct edgetpu_dev *etdev, u64 type)
 		return -EINVAL;
 	}
 
+	if (!edgetpu_pm_get_if_powered(etdev->pm)) {
+		etdev_warn(etdev, "Device not powered, skip debug dump");
+		return -ENODEV;
+	}
 	dump_setup =
 		(struct edgetpu_debug_dump_setup *)etdev->debug_dump_mem.vaddr;
 	dump_setup->type = type;
@@ -35,6 +71,7 @@ int edgetpu_get_debug_dump(struct edgetpu_dev *etdev, u64 type)
 	if (ret)
 		etdev_err(etdev, "KCI dump info req failed: %d", ret);
 
+	edgetpu_pm_put(etdev->pm);
 	return ret;
 }
 

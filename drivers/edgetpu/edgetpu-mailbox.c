@@ -986,6 +986,13 @@ static int edgetpu_mailbox_external_alloc_enable(struct edgetpu_client *client,
 	group = edgetpu_device_group_get(client->group);
 	mutex_unlock(&client->group_lock);
 
+	if (!edgetpu_wakelock_lock(client->wakelock)) {
+		etdev_err(client->etdev, "Enabling external mailbox needs wakelock acquired\n");
+		edgetpu_wakelock_unlock(client->wakelock);
+		edgetpu_device_group_put(client->group);
+		return -EAGAIN;
+	}
+
 	mutex_lock(&group->lock);
 	if (!edgetpu_device_group_is_finalized(group)) {
 		ret = -EINVAL;
@@ -1028,6 +1035,10 @@ static int edgetpu_mailbox_external_alloc_enable(struct edgetpu_client *client,
 	}
 unlock:
 	mutex_unlock(&group->lock);
+	if (!ret)
+		edgetpu_wakelock_inc_event_locked(client->wakelock,
+						  EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
+	edgetpu_wakelock_unlock(client->wakelock);
 	edgetpu_device_group_put(group);
 	return ret;
 }
@@ -1044,9 +1055,17 @@ static int edgetpu_mailbox_external_disable_free(struct edgetpu_client *client)
 	group = edgetpu_device_group_get(client->group);
 	mutex_unlock(&client->group_lock);
 
+	if (!edgetpu_wakelock_lock(client->wakelock)) {
+		etdev_err(client->etdev, "Disabling external mailbox needs wakelock acquired\n");
+		edgetpu_wakelock_unlock(client->wakelock);
+		edgetpu_device_group_put(client->group);
+		return -EAGAIN;
+	}
 	mutex_lock(&group->lock);
 	edgetpu_mailbox_external_disable_free_locked(group);
 	mutex_unlock(&group->lock);
+	edgetpu_wakelock_dec_event_locked(client->wakelock, EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
+	edgetpu_wakelock_unlock(client->wakelock);
 	edgetpu_device_group_put(group);
 	return 0;
 }
@@ -1073,8 +1092,7 @@ void edgetpu_mailbox_external_disable_free_locked(struct edgetpu_device_group *g
 	edgetpu_mailbox_external_free(group);
 }
 
-int edgetpu_mailbox_enable_ext(struct edgetpu_client *client, int mailbox_id,
-			       struct edgetpu_external_mailbox_req *ext_mailbox_req)
+static int edgetpu_mailbox_external_enable_by_id(struct edgetpu_client *client, int mailbox_id)
 {
 	int ret;
 
@@ -1085,24 +1103,19 @@ int edgetpu_mailbox_enable_ext(struct edgetpu_client *client, int mailbox_id,
 		return -EAGAIN;
 	}
 
-	if (mailbox_id == EDGETPU_MAILBOX_ID_USE_ASSOC) {
-		ret = edgetpu_mailbox_external_alloc_enable(client, ext_mailbox_req);
-		goto out;
-	}
 	etdev_dbg(client->etdev, "Enabling mailbox: %d\n", mailbox_id);
 
 	ret = edgetpu_mailbox_activate(client->etdev, mailbox_id, -1, false);
 	if (ret)
 		etdev_err(client->etdev, "Activate mailbox %d failed: %d", mailbox_id, ret);
-out:
-	if (!ret)
+	else
 		edgetpu_wakelock_inc_event_locked(client->wakelock,
 						  EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
 	edgetpu_wakelock_unlock(client->wakelock);
 	return ret;
 }
 
-int edgetpu_mailbox_disable_ext(struct edgetpu_client *client, int mailbox_id)
+static int edgetpu_mailbox_external_disable_by_id(struct edgetpu_client *client, int mailbox_id)
 {
 	int ret = 0;
 
@@ -1118,19 +1131,29 @@ int edgetpu_mailbox_disable_ext(struct edgetpu_client *client, int mailbox_id)
 		return -EAGAIN;
 	}
 
-	if (mailbox_id == EDGETPU_MAILBOX_ID_USE_ASSOC) {
-		ret = edgetpu_mailbox_external_disable_free(client);
-		goto out;
-	}
 	etdev_dbg(client->etdev, "Disabling mailbox: %d\n", mailbox_id);
 
 	edgetpu_mailbox_deactivate(client->etdev, mailbox_id);
-out:
-	if (!ret)
-		edgetpu_wakelock_dec_event_locked(client->wakelock,
-						  EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
+	edgetpu_wakelock_dec_event_locked(client->wakelock, EDGETPU_WAKELOCK_EVENT_EXT_MAILBOX);
 	edgetpu_wakelock_unlock(client->wakelock);
 	return ret;
+}
+
+int edgetpu_mailbox_enable_ext(struct edgetpu_client *client, int mailbox_id,
+			       struct edgetpu_external_mailbox_req *ext_mailbox_req)
+{
+	if (mailbox_id == EDGETPU_MAILBOX_ID_USE_ASSOC)
+		return edgetpu_mailbox_external_alloc_enable(client, ext_mailbox_req);
+	else
+		return edgetpu_mailbox_external_enable_by_id(client, mailbox_id);
+}
+
+int edgetpu_mailbox_disable_ext(struct edgetpu_client *client, int mailbox_id)
+{
+	if (mailbox_id == EDGETPU_MAILBOX_ID_USE_ASSOC)
+		return edgetpu_mailbox_external_disable_free(client);
+	else
+		return edgetpu_mailbox_external_disable_by_id(client, mailbox_id);
 }
 
 int edgetpu_mailbox_activate(struct edgetpu_dev *etdev, u32 mailbox_id, s16 vcid, bool first_open)

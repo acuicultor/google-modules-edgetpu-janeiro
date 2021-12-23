@@ -34,7 +34,8 @@ static struct platform_device sscd_dev;
  *
  * Returns the pointer to the first element of the mappings dump array. The allocated array should
  * be freed by the caller after the sscd segment is reported.
- * Returns NULL in case of failure.
+ * Returns a negative errno in case of failure.
+ * Returns NULL when there is no mapping allocated in groups.
  */
 static struct mobile_sscd_mappings_dump *
 mobile_sscd_collect_mappings_segment(struct edgetpu_device_group **groups, size_t num_groups,
@@ -44,19 +45,24 @@ mobile_sscd_collect_mappings_segment(struct edgetpu_device_group **groups, size_
 	struct edgetpu_mapping_root *mappings;
 	struct rb_node *node;
 	void *resized_arr;
-	size_t idx = 0, mappings_num = 0, new_size = 0;
+	size_t idx = 0, mappings_num = 0, new_size = 0, count;
 
-	mappings_dump = kmalloc(sizeof(struct mobile_sscd_mappings_dump), GFP_KERNEL);
+	mappings_dump = NULL;
 	for (idx = 0; idx < num_groups; idx++) {
 		mutex_lock(&groups[idx]->lock);
-		new_size +=
-			groups[idx]->host_mappings.count * sizeof(struct mobile_sscd_mappings_dump);
+		count = groups[idx]->host_mappings.count + groups[idx]->dmabuf_mappings.count;
+		if (count == 0) {
+			mutex_unlock(&groups[idx]->lock);
+			continue;
+		}
+		new_size += count * sizeof(*mappings_dump);
 		resized_arr = krealloc(mappings_dump, new_size, GFP_KERNEL);
 		if (!resized_arr) {
 			kfree(mappings_dump);
 			mutex_unlock(&groups[idx]->lock);
-			return NULL;
+			return ERR_PTR(-ENOMEM);
 		}
+		mappings_dump = resized_arr;
 
 		mappings = &groups[idx]->host_mappings;
 		for (node = rb_first(&mappings->rb); node; node = rb_next(node)) {
@@ -65,19 +71,9 @@ mobile_sscd_collect_mappings_segment(struct edgetpu_device_group **groups, size_
 
 			mappings_dump[mappings_num].host_address = map->host_address;
 			mappings_dump[mappings_num].device_address = map->device_address;
-			mappings_dump[mappings_num].alloc_iova = map->alloc_iova;
-			mappings_dump[mappings_num].size = (u64)map->alloc_size;
+			mappings_dump[mappings_num].size = (u64)map->map_size;
 			mappings_num++;
 		}
-		new_size += groups[idx]->dmabuf_mappings.count *
-			    sizeof(struct mobile_sscd_mappings_dump);
-		resized_arr = krealloc(mappings_dump, new_size, GFP_KERNEL);
-		if (!resized_arr) {
-			kfree(mappings_dump);
-			mutex_unlock(&groups[idx]->lock);
-			return NULL;
-		}
-
 		mappings = &groups[idx]->dmabuf_mappings;
 		for (node = rb_first(&mappings->rb); node; node = rb_next(node)) {
 			struct edgetpu_mapping *map =
@@ -85,8 +81,7 @@ mobile_sscd_collect_mappings_segment(struct edgetpu_device_group **groups, size_
 
 			mappings_dump[mappings_num].host_address = map->host_address;
 			mappings_dump[mappings_num].device_address = map->device_address;
-			mappings_dump[mappings_num].alloc_iova = map->alloc_iova;
-			mappings_dump[mappings_num].size = (u64)map->alloc_size;
+			mappings_dump[mappings_num].size = (u64)map->map_size;
 			mappings_num++;
 		}
 		mutex_unlock(&groups[idx]->lock);
@@ -243,11 +238,15 @@ static int mobile_sscd_generate_coredump(void *p_etdev, void *p_dump_setup)
 
 	if (num_groups) {
 		mappings_dump = mobile_sscd_collect_mappings_segment(groups, num_groups, &segs[i]);
-		if (!mappings_dump) {
-			ret = -ENOMEM;
+		if (IS_ERR(mappings_dump)) {
+			ret = PTR_ERR(mappings_dump);
 			goto out_sscd_generate_coredump;
 		}
-		i++;
+		/* increase @i if mappings present */
+		if (mappings_dump)
+			i++;
+		else
+			sscd_dump_segments_num--;
 	}
 
 	num_queues = mobile_sscd_collect_cmd_resp_queues(etdev, groups, num_groups, &segs[i]);
@@ -320,9 +319,11 @@ int edgetpu_debug_dump_init(struct edgetpu_dev *etdev)
 	if (!etdev->debug_dump_handlers)
 		return -ENOMEM;
 	etdev->debug_dump_handlers[DUMP_REASON_REQ_BY_USER] = mobile_sscd_generate_coredump;
+	etdev->debug_dump_handlers[DUMP_REASON_RECOVERABLE_FAULT] = mobile_sscd_generate_coredump;
 
 	pdev->sscd_info.pdata = &sscd_pdata;
 	pdev->sscd_info.dev = &sscd_dev;
+	edgetpu_setup_debug_dump_fs(etdev);
 	return ret;
 out_unregister_platform:
 	platform_device_unregister(&sscd_dev);
