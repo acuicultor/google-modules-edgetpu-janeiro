@@ -21,7 +21,8 @@
 #define SHUTDOWN_DELAY_US_MAX		20
 #define BOOTUP_DELAY_US_MIN		200
 #define BOOTUP_DELAY_US_MAX		250
-#define SHUTDOWN_MAX_DELAY_COUNT	50
+#define SHUTDOWN_MAX_DELAY_COUNT	1000
+#define SHUTDOWN_EXPECTED_DELAY_COUNT	50
 
 #define EDGETPU_PSM0_CFG 0x1c1880
 #define EDGETPU_PSM0_START 0x1c1884
@@ -107,7 +108,11 @@ static void janeiro_block_down(struct edgetpu_dev *etdev)
 		timeout_cnt++;
 	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
 	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
-		etdev_warn(etdev, "%s: blk_shutdown timeout\n", __func__);
+		etdev_warn(etdev, "%s: blk_shutdown timeout (%d uS) exceeded\n", __func__,
+			   SHUTDOWN_MAX_DELAY_COUNT * SHUTDOWN_DELAY_US_MAX);
+	else if (timeout_cnt > SHUTDOWN_EXPECTED_DELAY_COUNT)
+		etdev_info(etdev, "%s: excessive shutdown time (%d uS)", __func__,
+			   timeout_cnt * SHUTDOWN_DELAY_US_MAX);
 }
 
 static void janeiro_firmware_down(struct edgetpu_dev *etdev)
