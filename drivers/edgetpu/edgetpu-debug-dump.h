@@ -85,11 +85,6 @@ void edgetpu_debug_dump_exit(struct edgetpu_dev *etdev);
 
 /*
  * Send KCI request to get fw debug dump segments.
- *
- * This function can be called with @type set to 0 to simply set the dump buffer address and size
- * in the FW without dumping any segments.
- *
- * The caller must ensure that the device is powered on.
  */
 int edgetpu_get_debug_dump(struct edgetpu_dev *etdev,
 			   u64 type);

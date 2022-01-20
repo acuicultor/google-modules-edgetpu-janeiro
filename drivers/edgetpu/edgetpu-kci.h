@@ -363,13 +363,9 @@ void edgetpu_kci_mappings_show(struct edgetpu_dev *etdev, struct seq_file *s);
 /* Send shutdown request to firmware */
 int edgetpu_kci_shutdown(struct edgetpu_kci *kci);
 
-/* Request dump of inaccessible segments from firmware.
- *
- * @init_buffer flag is used to indicate that the req is only sent to set the dump buffer address
- * and size in FW.
- */
+/* Request dump of inaccessible segments from firmware */
 int edgetpu_kci_get_debug_dump(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
-			       size_t size, bool init_buffer);
+			       size_t size);
 
 /*
  * Inform the firmware to prepare to serve the VII of @mailbox_id.
