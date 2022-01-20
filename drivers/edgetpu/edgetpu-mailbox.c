@@ -973,10 +973,11 @@ static void edgetpu_mailbox_external_free(struct edgetpu_device_group *group)
 static int edgetpu_mailbox_external_alloc_enable(struct edgetpu_client *client,
 						 struct edgetpu_external_mailbox_req *req)
 {
-	int ret = 0, i, id;
+	int ret = 0, i;
 	struct edgetpu_external_mailbox *ext_mailbox = NULL;
 	struct edgetpu_device_group *group;
 	int vcid;
+	u32 mbox_map = 0;
 
 	mutex_lock(&client->group_lock);
 	if (!client->group || !edgetpu_device_group_is_leader(client->group, client)) {
@@ -1011,21 +1012,13 @@ static int edgetpu_mailbox_external_alloc_enable(struct edgetpu_client *client,
 	ext_mailbox = group->ext_mailbox;
 	vcid = group->vcid;
 
-	for (i = 0; i < ext_mailbox->count; i++) {
-		id = ext_mailbox->descriptors[i].mailbox->mailbox_id;
-		etdev_dbg(group->etdev, "Enabling mailbox: %d\n", id);
-		ret = edgetpu_mailbox_activate(group->etdev, id, vcid, false);
-		if (ret) {
-			etdev_err(group->etdev, "Activate mailbox %d failed: %d", id, ret);
-			break;
-		}
-	}
+	for (i = 0; i < ext_mailbox->count; i++)
+		mbox_map |= BIT(ext_mailbox->descriptors[i].mailbox->mailbox_id);
+
+	ret = edgetpu_mailbox_activate_bulk(group->etdev, mbox_map, vcid, false);
 
 	if (ret) {
-		while (i--) {
-			id = ext_mailbox->descriptors[i].mailbox->mailbox_id;
-			edgetpu_mailbox_deactivate(group->etdev, id);
-		}
+		etdev_err(group->etdev, "Activate mailbox bulk failed: %d", ret);
 		/*
 		 * Deactivate only fails if f/w is unresponsive which will put group
 		 * in errored state or mailbox physically disabled before requesting
@@ -1072,18 +1065,18 @@ static int edgetpu_mailbox_external_disable_free(struct edgetpu_client *client)
 
 void edgetpu_mailbox_external_disable_free_locked(struct edgetpu_device_group *group)
 {
-	u32 i, id;
+	u32 i, mbox_map = 0;
 	struct edgetpu_external_mailbox *ext_mailbox;
 
 	ext_mailbox = group->ext_mailbox;
 	if (!ext_mailbox)
 		return;
 
-	for (i = 0; i < ext_mailbox->count; i++) {
-		id = ext_mailbox->descriptors[i].mailbox->mailbox_id;
-		etdev_dbg(group->etdev, "Disabling mailbox: %d\n", id);
-		edgetpu_mailbox_deactivate(group->etdev, id);
-	}
+	for (i = 0; i < ext_mailbox->count; i++)
+		mbox_map |= BIT(ext_mailbox->descriptors[i].mailbox->mailbox_id);
+
+	etdev_dbg(group->etdev, "Disabling mailboxes in map: %x\n", mbox_map);
+	edgetpu_mailbox_deactivate_bulk(group->etdev, mbox_map);
 	/*
 	 * Deactivate only fails if f/w is unresponsive which will put group
 	 * in errored state or mailbox physically disabled before requesting
@@ -1156,18 +1149,19 @@ int edgetpu_mailbox_disable_ext(struct edgetpu_client *client, int mailbox_id)
 		return edgetpu_mailbox_external_disable_by_id(client, mailbox_id);
 }
 
-int edgetpu_mailbox_activate(struct edgetpu_dev *etdev, u32 mailbox_id, s16 vcid, bool first_open)
+int edgetpu_mailbox_activate_bulk(struct edgetpu_dev *etdev, u32 mailbox_map, s16 vcid,
+				  bool first_open)
 {
 	struct edgetpu_handshake *eh = &etdev->mailbox_manager->open_devices;
-	const u32 bit = BIT(mailbox_id);
 	int ret = 0;
 
 	mutex_lock(&eh->lock);
-	if (bit & ~eh->fw_state)
-		ret = edgetpu_kci_open_device(etdev->kci, mailbox_id, vcid, first_open);
+	if (mailbox_map & ~eh->fw_state)
+		ret = edgetpu_kci_open_device(etdev->kci, mailbox_map & ~eh->fw_state, vcid,
+					      first_open);
 	if (!ret) {
-		eh->state |= bit;
-		eh->fw_state |= bit;
+		eh->state |= mailbox_map;
+		eh->fw_state |= mailbox_map;
 	}
 	mutex_unlock(&eh->lock);
 	/*
@@ -1178,26 +1172,36 @@ int edgetpu_mailbox_activate(struct edgetpu_dev *etdev, u32 mailbox_id, s16 vcid
 	if (ret == -ETIMEDOUT)
 		edgetpu_watchdog_bite(etdev, false);
 	return ret;
+
 }
 
-void edgetpu_mailbox_deactivate(struct edgetpu_dev *etdev, u32 mailbox_id)
+int edgetpu_mailbox_activate(struct edgetpu_dev *etdev, u32 mailbox_id, s16 vcid, bool first_open)
+{
+	return edgetpu_mailbox_activate_bulk(etdev, BIT(mailbox_id), vcid, first_open);
+}
+
+void edgetpu_mailbox_deactivate_bulk(struct edgetpu_dev *etdev, u32 mailbox_map)
 {
 	struct edgetpu_handshake *eh = &etdev->mailbox_manager->open_devices;
-	const u32 bit = BIT(mailbox_id);
 	int ret = 0;
 
 	mutex_lock(&eh->lock);
-	if (bit & eh->fw_state)
-		ret = edgetpu_kci_close_device(etdev->kci, mailbox_id);
+	if (mailbox_map & eh->fw_state)
+		ret = edgetpu_kci_close_device(etdev->kci, mailbox_map & eh->fw_state);
 	if (ret)
-		etdev_err(etdev, "Deactivate mailbox %d failed: %d", mailbox_id, ret);
+		etdev_err(etdev, "Deactivate mailbox for map %x failed: %d", mailbox_map, ret);
 	/*
 	 * Always clears the states, FW should never reject CLOSE_DEVICE requests unless it's
 	 * unresponsive.
 	 */
-	eh->state &= ~bit;
-	eh->fw_state &= ~bit;
+	eh->state &= ~mailbox_map;
+	eh->fw_state &= ~mailbox_map;
 	mutex_unlock(&eh->lock);
+}
+
+void edgetpu_mailbox_deactivate(struct edgetpu_dev *etdev, u32 mailbox_id)
+{
+	edgetpu_mailbox_deactivate_bulk(etdev, BIT(mailbox_id));
 }
 
 void edgetpu_handshake_clear_fw_state(struct edgetpu_handshake *eh)

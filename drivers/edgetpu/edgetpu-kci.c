@@ -1005,13 +1005,14 @@ int edgetpu_kci_shutdown(struct edgetpu_kci *kci)
 }
 
 int edgetpu_kci_get_debug_dump(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
-			       size_t size)
+			       size_t size, bool init_buffer)
 {
 	struct edgetpu_command_element cmd = {
 		.code = KCI_CODE_GET_DEBUG_DUMP,
 		.dma = {
 			.address = tpu_addr,
 			.size = size,
+			.flags = init_buffer,
 		},
 	};
 
@@ -1020,17 +1021,17 @@ int edgetpu_kci_get_debug_dump(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
 	return edgetpu_kci_send_cmd(kci, &cmd);
 }
 
-int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_id, s16 vcid, bool first_open)
+int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_map, s16 vcid, bool first_open)
 {
 	const struct edgetpu_kci_open_device_detail detail = {
-		.mailbox_id = mailbox_id,
+		.mailbox_map = mailbox_map,
 		.vcid = vcid,
-		.flags = first_open,
+		.flags = (mailbox_map << 1) | first_open,
 	};
 	struct edgetpu_command_element cmd = {
 		.code = KCI_CODE_OPEN_DEVICE,
 		.dma = {
-			.flags = BIT(mailbox_id),
+			.flags = mailbox_map,
 		},
 	};
 
@@ -1042,12 +1043,12 @@ int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_id, s16 vcid, b
 	return edgetpu_kci_send_cmd_with_data(kci, &cmd, &detail, sizeof(detail));
 }
 
-int edgetpu_kci_close_device(struct edgetpu_kci *kci, u32 mailbox_id)
+int edgetpu_kci_close_device(struct edgetpu_kci *kci, u32 mailbox_map)
 {
 	struct edgetpu_command_element cmd = {
 		.code = KCI_CODE_CLOSE_DEVICE,
 		.dma = {
-			.flags = BIT(mailbox_id),
+			.flags = mailbox_map,
 		},
 	};
 

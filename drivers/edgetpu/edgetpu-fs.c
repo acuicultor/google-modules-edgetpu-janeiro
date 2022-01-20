@@ -704,14 +704,14 @@ static int edgetpu_ioctl_test_external(struct edgetpu_client *client,
 	if (copy_from_user(&test_ext, argp, sizeof(test_ext)))
 		return -EFAULT;
 
-	if (hweight32(test_ext.mbox_bmap) > 1)
+	if (hweight32(test_ext.mbox_bmap) != 1)
 		return -EINVAL;
 
 	client_info.attr = (struct edgetpu_mailbox_attr __user *)test_ext.attrs;
 	client_info.tpu_fd = test_ext.fd;
 	client_info.mbox_map = test_ext.mbox_bmap;
 
-	info = kmalloc(sizeof(*info) + sizeof(struct edgetpu_ext_mailbox_descriptor *), GFP_KERNEL);
+	info = kmalloc(sizeof(*info) + sizeof(struct edgetpu_ext_mailbox_descriptor), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 

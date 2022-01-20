@@ -562,7 +562,11 @@ static int mobile_power_down(struct edgetpu_pm *etpm)
 			etdev->state = ETDEV_STATE_NOFW;
 		}
 		edgetpu_kci_cancel_work_queues(etdev->kci);
+	}
+
+	if (etdev->firmware) {
 		res = edgetpu_mobile_firmware_reset_cpu(etdev, true);
+
 		/* TODO(b/198181290): remove -EIO once gsaproxy wakelock is implemented */
 		if (res == -EAGAIN || res == -EIO)
 			return -EAGAIN;

@@ -3,7 +3,7 @@
  * Module that defines structure to retrieve debug dump segments
  * specific to the family of EdgeTPUs for mobile devices.
  *
- * Copyright (C) 2021 Google, Inc.
+ * Copyright (C) 2021-2022 Google LLC
  */
 
 #ifndef __MOBILE_DEBUG_DUMP_H__
@@ -16,10 +16,4 @@ struct mobile_sscd_info {
 	void *dev; /* SSCD platform device */
 };
 
-struct mobile_sscd_mappings_dump {
-	u64 host_address;
-	u64 device_address;
-	u64 size;
-};
-
-#endif /* MOBILE_DEBUG_DUMP_H_ */
+#endif /* __MOBILE_DEBUG_DUMP_H__ */
