@@ -91,10 +91,14 @@ static int edgetpu_kci_join_group_worker(struct kci_worker_param *param)
 	struct edgetpu_device_group *group = param->group;
 	uint i = param->idx;
 	struct edgetpu_dev *etdev = edgetpu_device_group_nth_etdev(group, i);
+	int ret;
 
 	etdev_dbg(etdev, "%s: join group %u %u/%u", __func__,
 		  group->workload_id, i + 1, group->n_clients);
-	return edgetpu_kci_join_group(etdev->kci, group->n_clients, i);
+	ret = edgetpu_kci_join_group(etdev->kci, group->n_clients, i);
+	if (!ret)
+		edgetpu_sw_wdt_inc_active_ref(etdev);
+	return ret;
 }
 
 static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
@@ -104,6 +108,7 @@ static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
 	struct edgetpu_dev *etdev = edgetpu_device_group_nth_etdev(group, i);
 
 	etdev_dbg(etdev, "%s: leave group %u", __func__, group->workload_id);
+	edgetpu_sw_wdt_dec_active_ref(etdev);
 	edgetpu_kci_update_usage(etdev);
 	edgetpu_kci_leave_group(etdev->kci);
 	return 0;
@@ -119,17 +124,24 @@ static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
 static int edgetpu_group_activate(struct edgetpu_device_group *group)
 {
 	u8 mailbox_id;
-	int ret;
+	int ret, i;
+	struct edgetpu_dev *etdev;
 
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return 0;
+
 	mailbox_id = edgetpu_group_context_id_locked(group);
 	ret = edgetpu_mailbox_activate(group->etdev, mailbox_id, group->vcid, !group->activated);
-	if (ret)
+	if (ret) {
 		etdev_err(group->etdev, "activate mailbox for VCID %d failed with %d", group->vcid,
 			  ret);
-	else
+	} else {
 		group->activated = true;
+		for (i = 0; i < group->n_clients; i++) {
+			etdev = edgetpu_device_group_nth_etdev(group, i);
+			edgetpu_sw_wdt_inc_active_ref(etdev);
+		}
+	}
 	atomic_inc(&group->etdev->job_count);
 	return ret;
 }
@@ -142,9 +154,16 @@ static int edgetpu_group_activate(struct edgetpu_device_group *group)
 static void edgetpu_group_deactivate(struct edgetpu_device_group *group)
 {
 	u8 mailbox_id;
+	int i;
+	struct edgetpu_dev *etdev;
 
 	if (edgetpu_group_mailbox_detached_locked(group))
 		return;
+
+	for (i = 0; i < group->n_clients; i++) {
+		etdev = edgetpu_device_group_nth_etdev(group, i);
+		edgetpu_sw_wdt_dec_active_ref(etdev);
+	}
 	mailbox_id = edgetpu_group_context_id_locked(group);
 	edgetpu_mailbox_deactivate(group->etdev, mailbox_id);
 }
@@ -450,15 +469,8 @@ void edgetpu_group_notify(struct edgetpu_device_group *group, uint event_id)
  */
 static void edgetpu_device_group_release(struct edgetpu_device_group *group)
 {
-	int i;
-	struct edgetpu_dev *etdev;
-
 	edgetpu_group_clear_events(group);
 	if (is_finalized_or_errored(group)) {
-		for (i = 0; i < group->n_clients; i++) {
-			etdev = edgetpu_device_group_nth_etdev(group, i);
-			edgetpu_sw_wdt_dec_active_ref(etdev);
-		}
 		edgetpu_device_group_kci_leave(group);
 		/*
 		 * Mappings clear should be performed after had a handshake with
@@ -793,8 +805,7 @@ bool edgetpu_device_group_is_leader(struct edgetpu_device_group *group,
 
 int edgetpu_device_group_finalize(struct edgetpu_device_group *group)
 {
-	int ret = 0, i;
-	struct edgetpu_dev *etdev;
+	int ret = 0;
 	bool mailbox_attached = false;
 	struct edgetpu_client *leader;
 
@@ -870,10 +881,6 @@ int edgetpu_device_group_finalize(struct edgetpu_device_group *group)
 
 	group->status = EDGETPU_DEVICE_GROUP_FINALIZED;
 
-	for (i = 0; i < group->n_clients; i++) {
-		etdev = edgetpu_device_group_nth_etdev(group, i);
-		edgetpu_sw_wdt_inc_active_ref(etdev);
-	}
 	mutex_unlock(&group->lock);
 	return 0;
 

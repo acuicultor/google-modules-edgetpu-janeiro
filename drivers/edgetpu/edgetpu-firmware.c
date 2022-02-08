@@ -173,10 +173,7 @@ static int edgetpu_firmware_handshake(struct edgetpu_firmware *et_fw)
 		if (ret)
 			etdev_warn(etdev, "telemetry KCI error: %d", ret);
 		/* Set debug dump buffer in FW */
-		ret = edgetpu_get_debug_dump(etdev, 0);
-
-		if (ret)
-			etdev_err(etdev, "failed to set dump buffer in FW error: %d", ret);
+		edgetpu_get_debug_dump(etdev, 0);
 	}
 	return 0;
 }

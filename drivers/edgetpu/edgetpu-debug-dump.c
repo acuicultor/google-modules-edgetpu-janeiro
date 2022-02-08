@@ -52,7 +52,7 @@ int edgetpu_get_debug_dump(struct edgetpu_dev *etdev, u64 type)
 	bool init_fw_dump_buffer = false;
 
 	if (!etdev->debug_dump_mem.vaddr) {
-		etdev_err(etdev, "Debug dump not allocated");
+		etdev_dbg(etdev, "Debug dump not allocated");
 		return -EINVAL;
 	}
 
@@ -69,8 +69,12 @@ int edgetpu_get_debug_dump(struct edgetpu_dev *etdev, u64 type)
 					 etdev->debug_dump_mem.size, init_fw_dump_buffer);
 	etdev_dbg(etdev, "Sent debug dump request, tpu addr: %llx",
 		  (u64)etdev->debug_dump_mem.tpu_addr);
-	if (ret)
+	if (ret) {
+		if (init_fw_dump_buffer)
+			etdev_err(etdev, "failed to init dump buffer in FW");
+
 		etdev_err(etdev, "Debug dump KCI req failed: %d", ret);
+	}
 
 	return ret;
 }
