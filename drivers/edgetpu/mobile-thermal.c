@@ -16,7 +16,7 @@
 #include <linux/slab.h>
 #include <linux/thermal.h>
 #include <linux/version.h>
-#include <soc/google/gs101_tmu.h>
+#include <soc/google/gs_tmu.h>
 
 #include "edgetpu-config.h"
 #include "edgetpu-internal.h"
