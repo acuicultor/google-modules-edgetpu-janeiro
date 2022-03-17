@@ -12,6 +12,16 @@
 
 #define EDGETPU_DEV_MAX		1
 
+/*
+ * Can be coherent with AP
+ *
+ * Linux IOMMU-DMA APIs optimise cache operations based on "dma-coherent"
+ * property in DT. Handle "dma-coherent" property in driver itself instead of
+ * specifying in DT so as to support both coherent and non-coherent buffers on
+ * VIIs.
+ */
+#define EDGETPU_IS_DMA_COHERENT
+
 #define EDGETPU_HAS_MULTI_GROUPS
 /* 1 context per VII/group plus 1 for KCI */
 #define EDGETPU_NCONTEXTS 8

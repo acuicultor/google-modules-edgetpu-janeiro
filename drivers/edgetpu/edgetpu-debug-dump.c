@@ -73,7 +73,10 @@ int edgetpu_get_debug_dump(struct edgetpu_dev *etdev, u64 type)
 		if (init_fw_dump_buffer)
 			etdev_err(etdev, "failed to init dump buffer in FW");
 
-		etdev_err(etdev, "Debug dump KCI req failed: %d", ret);
+		if (ret == KCI_ERROR_UNIMPLEMENTED)
+			etdev_dbg(etdev, "Debug dump KCI not implemented");
+		else
+			etdev_err(etdev, "Debug dump KCI req failed: %d", ret);
 	}
 
 	return ret;

@@ -449,8 +449,8 @@ static int mobile_power_up(struct edgetpu_pm *etpm)
 		edgetpu_kci_reinit(etdev->kci);
 	}
 	if (etdev->mailbox_manager) {
-		etdev_dbg(etdev, "Resetting VII mailboxes\n");
-		edgetpu_mailbox_reset_vii(etdev->mailbox_manager);
+		etdev_dbg(etdev, "Resetting (VII/external) mailboxes\n");
+		edgetpu_mailbox_reset_mailboxes(etdev->mailbox_manager);
 	}
 
 	if (!etdev->firmware)
@@ -741,7 +741,7 @@ static void mobile_pm_deactivate_bts_scenario(struct edgetpu_dev *etdev)
 	mutex_unlock(&platform_pwr->scenario_lock);
 }
 
-void mobile_pm_set_bts(struct edgetpu_dev *etdev, u32 bts_val)
+void mobile_pm_set_bts(struct edgetpu_dev *etdev, u16 bts_val)
 {
 	etdev_dbg(etdev, "%s: bts request - val = %u\n", __func__, bts_val);
 

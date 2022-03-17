@@ -240,7 +240,7 @@ static void edgetpu_kci_consume_wait_list(
  */
 static void
 edgetpu_kci_handle_response(struct edgetpu_kci *kci,
-			    const struct edgetpu_kci_response_element *resp)
+			    struct edgetpu_kci_response_element *resp)
 {
 	if (resp->seq & KCI_REVERSE_FLAG) {
 		int ret = edgetpu_reverse_kci_add_response(kci, resp);
@@ -252,6 +252,11 @@ edgetpu_kci_handle_response(struct edgetpu_kci *kci,
 				resp->code, ret);
 		return;
 	}
+	/*
+	 * Response status can be set after the RKCI status has been preserved
+	 * by copying response elements in the circular queue above.
+	 */
+	resp->status = KCI_STATUS_OK;
 	edgetpu_kci_consume_wait_list(kci, resp);
 }
 
@@ -322,7 +327,6 @@ static struct edgetpu_kci_response_element *edgetpu_kci_fetch_responses(
 		j = CIRCULAR_QUEUE_REAL_INDEX(head);
 		for (i = 0; i < count; i++) {
 			memcpy(&ret[total], &queue[j], sizeof(*queue));
-			ret[total].status = KCI_STATUS_OK;
 			j = (j + 1) % size;
 			total++;
 		}
@@ -400,7 +404,6 @@ edgetpu_kci_fetch_one_response(struct edgetpu_kci *kci,
 	}
 
 	memcpy(resp, &queue[CIRCULAR_QUEUE_REAL_INDEX(head)], sizeof(*queue));
-	resp->status = KCI_STATUS_OK;
 	edgetpu_mailbox_inc_resp_queue_head(kci->mailbox, 1);
 
 	spin_unlock(&kci->resp_queue_lock);

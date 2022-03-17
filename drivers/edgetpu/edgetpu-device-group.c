@@ -116,6 +116,14 @@ static int edgetpu_kci_leave_group_worker(struct kci_worker_param *param)
 
 #endif /* EDGETPU_HAS_MCP */
 
+static int edgetpu_group_activate_external_mailbox(struct edgetpu_device_group *group)
+{
+	if (!group->ext_mailbox)
+		return 0;
+	edgetpu_mailbox_reinit_external_mailbox(group);
+	return edgetpu_mailbox_activate_external_mailbox(group);
+}
+
 /*
  * Activates the VII mailbox @group owns.
  *
@@ -144,6 +152,12 @@ static int edgetpu_group_activate(struct edgetpu_device_group *group)
 	}
 	atomic_inc(&group->etdev->job_count);
 	return ret;
+}
+
+static void edgetpu_group_deactivate_external_mailbox(struct edgetpu_device_group *group)
+{
+	edgetpu_mailbox_deactivate_external_mailbox(group);
+	edgetpu_mailbox_disable_external_mailbox(group);
 }
 
 /*
@@ -1166,8 +1180,8 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	 */
 	pages = kvmalloc((num_pages * sizeof(*pages)), GFP_KERNEL | __GFP_NOWARN);
 	if (!pages) {
-		etdev_dbg(etdev, "%s: kvmalloc pages failed (%lu bytes)\n",
-			  __func__, (num_pages * sizeof(*pages)));
+		etdev_err(etdev, "out of memory allocating pages (%lu bytes)",
+			  num_pages * sizeof(*pages));
 		return ERR_PTR(-ENOMEM);
 	}
 	/*
@@ -1210,8 +1224,8 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	/* Allocate our own vmas array non-contiguous. */
 	vmas = kvmalloc((num_pages * sizeof(*vmas)), GFP_KERNEL | __GFP_NOWARN);
 	if (!vmas) {
-		etdev_dbg(etdev, "%s: kvmalloc vmas failed (%lu bytes)\n",
-			  __func__, (num_pages * sizeof(*pages)));
+		etdev_err(etdev, "out of memory allocating vmas (%lu bytes)",
+			  num_pages * sizeof(*pages));
 		kvfree(pages);
 		return ERR_PTR(-ENOMEM);
 	}
@@ -1223,6 +1237,11 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 			  group->workload_id, (void *)host_addr, num_pages,
 			  ret);
 		num_pages = 0;
+
+		if (ret == -ENOMEM)
+			etdev_err(etdev,
+				  "system out of memory locking %u pages",
+				  num_pages);
 		goto error;
 	}
 	if (ret < num_pages) {
@@ -1856,6 +1875,7 @@ void edgetpu_group_close_and_detach_mailbox(struct edgetpu_device_group *group)
 	if (is_finalized_or_errored(group)) {
 		edgetpu_group_deactivate(group);
 		edgetpu_group_detach_mailbox_locked(group);
+		edgetpu_group_deactivate_external_mailbox(group);
 	}
 	mutex_unlock(&group->lock);
 }
@@ -1885,8 +1905,14 @@ int edgetpu_group_attach_and_open_mailbox(struct edgetpu_device_group *group)
 		goto out_unlock;
 	ret = edgetpu_group_activate(group);
 	if (ret)
-		edgetpu_group_detach_mailbox_locked(group);
+		goto error_detach;
+	ret = edgetpu_group_activate_external_mailbox(group);
+	if (!ret)
+		goto out_unlock;
 
+	edgetpu_group_deactivate(group);
+error_detach:
+	edgetpu_group_detach_mailbox_locked(group);
 out_unlock:
 	mutex_unlock(&group->lock);
 	return ret;

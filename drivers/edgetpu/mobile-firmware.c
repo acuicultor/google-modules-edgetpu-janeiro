@@ -374,6 +374,8 @@ static int mobile_firmware_restart(struct edgetpu_firmware *et_fw, bool force_re
 	if (force_reset)
 		edgetpu_mobile_firmware_reset_cpu(etdev, true);
 
+	mobile_firmware_setup_ssmt(etdev);
+
 	return edgetpu_mobile_firmware_reset_cpu(etdev, false);
 }
 

@@ -74,7 +74,7 @@ void edgetpu_mark_probe_fail(struct edgetpu_dev *etdev)
 }
 
 void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
-				    struct edgetpu_kci_response_element *resp)
+				     struct edgetpu_kci_response_element *resp)
 {
 	switch (resp->code) {
 	case RKCI_CODE_PM_QOS:
@@ -82,6 +82,13 @@ void edgetpu_chip_handle_reverse_kci(struct edgetpu_dev *etdev,
 		break;
 	case RKCI_CODE_BTS:
 		mobile_pm_set_bts(etdev, resp->retval);
+		break;
+	case RKCI_CODE_PM_QOS_BTS:
+		/* FW indicates to ignore the request by setting them to undefined values. */
+		if (resp->retval != (typeof(resp->retval))~0ull)
+			mobile_pm_set_pm_qos(etdev, resp->retval);
+		if (resp->status != (typeof(resp->status))~0ull)
+			mobile_pm_set_bts(etdev, resp->status);
 		break;
 	default:
 		etdev_warn(etdev, "%s: Unrecognized KCI request: %u\n",

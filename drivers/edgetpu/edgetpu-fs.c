@@ -112,25 +112,20 @@ static int edgetpu_fs_release(struct inode *inode, struct file *file)
 	etdev = client->etdev;
 
 	LOCK(client);
-	wakelock_count = edgetpu_wakelock_lock(client->wakelock);
 	/*
-	 * @wakelock_count = 0 means the device might be powered off. And for group with a
-	 * non-detachable mailbox, its mailbox is removed when the group is released, in such case
-	 * we need to ensure the device is powered to prevent kernel panic on programming VII
-	 * mailbox CSRs.
-	 *
-	 * For mailbox-detachable groups the mailbox had been removed when the wakelock was
-	 * released, edgetpu_device_group_release() doesn't need the device be powered in this case.
+	 * Safe to read wakelock->req_count here since req_count is only
+	 * modified during [acquire/release]_wakelock ioctl calls which cannot
+	 * race with releasing client/fd.
 	 */
-	if (!wakelock_count && client->group && !client->group->mailbox_detachable) {
-		/* assumes @group->etdev == @client->etdev, i.e. @client is the leader of @group */
-		if (!edgetpu_pm_get(etdev->pm))
-			wakelock_count = 1;
-		else
-			/* failed to power on - prevent group releasing from accessing the device */
-			client->group->dev_inaccessible = true;
-	}
-	edgetpu_wakelock_unlock(client->wakelock);
+	wakelock_count = NO_WAKELOCK(client->wakelock) ? 1 : client->wakelock->req_count;
+	/*
+	 * @wakelock_count = 0 means the device might be powered off. Mailbox(EXT/VII) is removed
+	 * when the group is released, So we need to ensure the device should not accessed to
+	 * prevent kernel panic on programming mailbox CSRs.
+	 */
+	if (!wakelock_count && client->group)
+		client->group->dev_inaccessible = true;
+
 	UNLOCK(client);
 
 	edgetpu_client_remove(client);
@@ -612,15 +607,20 @@ static int edgetpu_ioctl_acquire_wakelock(struct edgetpu_client *client)
 		ret = count;
 		goto error_unlock;
 	}
-	if (!count && client->group)
-		ret = edgetpu_group_attach_and_open_mailbox(client->group);
-	if (ret) {
-		etdev_warn(client->etdev,
-			   "failed to attach mailbox: %d", ret);
+	if (!count) {
+		if (client->group)
+			ret = edgetpu_group_attach_and_open_mailbox(client->group);
+		if (ret) {
+			etdev_warn(client->etdev,
+				   "failed to attach mailbox: %d", ret);
+			edgetpu_pm_put(client->etdev->pm);
+			edgetpu_wakelock_release(client->wakelock);
+			edgetpu_wakelock_unlock(client->wakelock);
+			goto error_unlock;
+		}
+	} else {
+		/* Balance the power up count due to pm_get above.*/
 		edgetpu_pm_put(client->etdev->pm);
-		edgetpu_wakelock_release(client->wakelock);
-		edgetpu_wakelock_unlock(client->wakelock);
-		goto error_unlock;
 	}
 	edgetpu_wakelock_unlock(client->wakelock);
 	UNLOCK(client);

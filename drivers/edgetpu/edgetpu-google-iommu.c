@@ -354,12 +354,15 @@ int edgetpu_mmu_map(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 	 * Per-context mappings are mirrored to their specific domains here
 	 */
 	if (params.domain != default_domain) {
-		if (!iommu_map_sg(params.domain, iova, map->sgt.sgl,
-				  map->sgt.orig_nents, params.prot)) {
+		ssize_t mapped = (ssize_t)iommu_map_sg(params.domain, iova, map->sgt.sgl,
+						       map->sgt.orig_nents, params.prot);
+
+		/* iommu_map_sg returns 0 on failure before 5.15, returns -errno afterwards */
+		if (mapped <= 0) {
 			/* Undo the mapping in the default domain */
 			dma_unmap_sg_attrs(etdev->dev, map->sgt.sgl, map->sgt.orig_nents, map->dir,
 					   DMA_ATTR_SKIP_CPU_SYNC);
-			return -ENOMEM;
+			return mapped == 0 ? -ENOMEM : (int)mapped;
 		}
 	}
 
