@@ -16,7 +16,8 @@ endif
 edgetpu-objs	:= edgetpu-async.o edgetpu-dmabuf.o edgetpu-iremap-pool.o \
 		   edgetpu-kci.o edgetpu-mailbox.o edgetpu-mapping.o \
 		   edgetpu-sw-watchdog.o edgetpu-telemetry.o \
-		   edgetpu-firmware-util.o edgetpu-firmware.o
+		   edgetpu-firmware-util.o edgetpu-firmware.o \
+		   edgetpu-domain-pool.o
 
 janeiro-objs	:= janeiro-core.o janeiro-debug-dump.o janeiro-device-group.o \
 		   janeiro-device.o janeiro-firmware.o janeiro-fs.o \

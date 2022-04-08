@@ -1236,12 +1236,11 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 		etdev_dbg(etdev, "pin_user_pages failed %u:%pK-%u: %d",
 			  group->workload_id, (void *)host_addr, num_pages,
 			  ret);
-		num_pages = 0;
-
 		if (ret == -ENOMEM)
 			etdev_err(etdev,
 				  "system out of memory locking %u pages",
 				  num_pages);
+		num_pages = 0;
 		goto error;
 	}
 	if (ret < num_pages) {
