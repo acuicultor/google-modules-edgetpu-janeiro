@@ -518,6 +518,7 @@ int edgetpu_debug_dump_init(struct edgetpu_dev *etdev)
 		return -ENOMEM;
 	etdev->debug_dump_handlers[DUMP_REASON_REQ_BY_USER] = mobile_sscd_generate_coredump;
 	etdev->debug_dump_handlers[DUMP_REASON_RECOVERABLE_FAULT] = mobile_sscd_generate_coredump;
+	etdev->debug_dump_handlers[DUMP_REASON_FW_CHECKPOINT] = mobile_sscd_generate_coredump;
 
 	pdev->sscd_info.pdata = &sscd_pdata;
 	pdev->sscd_info.dev = &sscd_dev;
