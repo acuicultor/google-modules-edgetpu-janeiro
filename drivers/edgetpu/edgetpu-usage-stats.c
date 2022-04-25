@@ -570,6 +570,69 @@ static ssize_t hardware_preempt_count_store(struct device *dev, struct device_at
 static DEVICE_ATTR(hardware_preempt_count, 0664, hardware_preempt_count_show,
 		   hardware_preempt_count_store);
 
+static ssize_t hardware_ctx_save_time_show(struct device *dev, struct device_attribute *attr,
+					   char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_counter(etdev, EDGETPU_COUNTER_HARDWARE_CTX_SAVE_TIME_US);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t hardware_ctx_save_time_store(struct device *dev, struct device_attribute *attr,
+					    const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+
+	edgetpu_counter_clear(etdev, EDGETPU_COUNTER_HARDWARE_CTX_SAVE_TIME_US);
+	return count;
+}
+static DEVICE_ATTR(hardware_ctx_save_time, 0664, hardware_ctx_save_time_show,
+		   hardware_ctx_save_time_store);
+
+static ssize_t scalar_fence_wait_time_show(struct device *dev, struct device_attribute *attr,
+					   char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_counter(etdev, EDGETPU_COUNTER_SCALAR_FENCE_WAIT_TIME_US);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t scalar_fence_wait_time_store(struct device *dev, struct device_attribute *attr,
+					    const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+
+	edgetpu_counter_clear(etdev, EDGETPU_COUNTER_SCALAR_FENCE_WAIT_TIME_US);
+	return count;
+}
+static DEVICE_ATTR(scalar_fence_wait_time, 0664, scalar_fence_wait_time_show,
+		   scalar_fence_wait_time_store);
+
+static ssize_t long_suspend_count_show(struct device *dev, struct device_attribute *attr,
+					   char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_counter(etdev, EDGETPU_COUNTER_LONG_SUSPEND);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t long_suspend_count_store(struct device *dev, struct device_attribute *attr,
+					    const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+
+	edgetpu_counter_clear(etdev, EDGETPU_COUNTER_LONG_SUSPEND);
+	return count;
+}
+static DEVICE_ATTR(long_suspend_count, 0664, long_suspend_count_show,
+		   long_suspend_count_store);
+
 static ssize_t outstanding_commands_max_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -629,6 +692,93 @@ static ssize_t preempt_depth_max_store(
 static DEVICE_ATTR(preempt_depth_max, 0664, preempt_depth_max_show,
 		   preempt_depth_max_store);
 
+static ssize_t hardware_ctx_save_time_max_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_max_watermark(
+			etdev, EDGETPU_MAX_WATERMARK_HARDWARE_CTX_SAVE_TIME_US);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t hardware_ctx_save_time_max_store(
+	struct device *dev, struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	struct edgetpu_usage_stats *ustats = etdev->usage_stats;
+
+	if (ustats) {
+		mutex_lock(&ustats->usage_stats_lock);
+		ustats->max_watermark[EDGETPU_MAX_WATERMARK_HARDWARE_CTX_SAVE_TIME_US] = 0;
+		mutex_unlock(&ustats->usage_stats_lock);
+	}
+
+	return count;
+}
+static DEVICE_ATTR(hardware_ctx_save_time_max, 0664, hardware_ctx_save_time_max_show,
+		   hardware_ctx_save_time_max_store);
+
+static ssize_t scalar_fence_wait_time_max_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_max_watermark(
+			etdev, EDGETPU_MAX_WATERMARK_SCALAR_FENCE_WAIT_TIME_US);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t scalar_fence_wait_time_max_store(
+	struct device *dev, struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	struct edgetpu_usage_stats *ustats = etdev->usage_stats;
+
+	if (ustats) {
+		mutex_lock(&ustats->usage_stats_lock);
+		ustats->max_watermark[EDGETPU_MAX_WATERMARK_SCALAR_FENCE_WAIT_TIME_US] = 0;
+		mutex_unlock(&ustats->usage_stats_lock);
+	}
+
+	return count;
+}
+static DEVICE_ATTR(scalar_fence_wait_time_max, 0664, scalar_fence_wait_time_max_show,
+		   scalar_fence_wait_time_max_store);
+
+static ssize_t suspend_time_max_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	int64_t val;
+
+	val = edgetpu_usage_get_max_watermark(
+			etdev, EDGETPU_MAX_WATERMARK_SUSPEND_TIME_US);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", val);
+}
+
+static ssize_t suspend_time_max_store(
+	struct device *dev, struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
+	struct edgetpu_usage_stats *ustats = etdev->usage_stats;
+
+	if (ustats) {
+		mutex_lock(&ustats->usage_stats_lock);
+		ustats->max_watermark[EDGETPU_MAX_WATERMARK_SUSPEND_TIME_US] = 0;
+		mutex_unlock(&ustats->usage_stats_lock);
+	}
+
+	return count;
+}
+static DEVICE_ATTR(suspend_time_max, 0664, suspend_time_max_show,
+		   suspend_time_max_store);
+
 static ssize_t fw_thread_stats_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -681,8 +831,14 @@ static struct attribute *usage_stats_dev_attrs[] = {
 	&dev_attr_param_cache_miss_count.attr,
 	&dev_attr_context_preempt_count.attr,
 	&dev_attr_hardware_preempt_count.attr,
+	&dev_attr_hardware_ctx_save_time.attr,
+	&dev_attr_scalar_fence_wait_time.attr,
+	&dev_attr_long_suspend_count.attr,
 	&dev_attr_outstanding_commands_max.attr,
 	&dev_attr_preempt_depth_max.attr,
+	&dev_attr_hardware_ctx_save_time_max.attr,
+	&dev_attr_scalar_fence_wait_time_max.attr,
+	&dev_attr_suspend_time_max.attr,
 	&dev_attr_fw_thread_stats.attr,
 	NULL,
 };

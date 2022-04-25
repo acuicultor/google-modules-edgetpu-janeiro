@@ -1168,10 +1168,16 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 
 	if (size == 0)
 		return ERR_PTR(-EINVAL);
+	if (!access_ok((const void *)host_addr, size)) {
+		etdev_err(etdev, "invalid address range in buffer map request");
+		return ERR_PTR(-EFAULT);
+	}
 	offset = host_addr & (PAGE_SIZE - 1);
-	/* overflow check */
-	if (unlikely((size + offset) / PAGE_SIZE >= UINT_MAX - 1 || size + offset < size))
-		return ERR_PTR(-ENOMEM);
+	/* overflow check (should also be caught by access_ok) */
+	if (unlikely((size + offset) / PAGE_SIZE >= UINT_MAX - 1 || size + offset < size)) {
+		etdev_err(etdev, "address overflow in buffer map request");
+		return ERR_PTR(-EFAULT);
+	}
 	num_pages = DIV_ROUND_UP((size + offset), PAGE_SIZE);
 	etdev_dbg(etdev, "%s: hostaddr=%#llx pages=%u", __func__, host_addr, num_pages);
 	/*
@@ -1204,10 +1210,20 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 		*pnum_pages = num_pages;
 		return pages;
 	}
+	if (ret == -EFAULT && !*preadonly) {
+		foll_flags &= ~FOLL_WRITE;
+		*preadonly = true;
+		ret = pin_user_pages_fast(host_addr & PAGE_MASK, num_pages,
+					  foll_flags, pages);
+	}
 	if (ret < 0) {
 		etdev_dbg(etdev, "pin_user_pages failed %u:%pK-%u: %d",
 			  group->workload_id, (void *)host_addr, num_pages,
 			  ret);
+		if (ret == -EFAULT)
+			etdev_err(etdev,
+				  "bad address locking %u pages for %s",
+				  num_pages, *preadonly ? "read" : "write");
 		if (ret != -ENOMEM) {
 			num_pages = 0;
 			goto error;

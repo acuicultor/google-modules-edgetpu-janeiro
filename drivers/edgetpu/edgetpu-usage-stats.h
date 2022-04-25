@@ -74,8 +74,14 @@ enum edgetpu_usage_counter_type {
 	EDGETPU_COUNTER_CONTEXT_PREEMPTS = 6,
 	/* Number of times a hardware preemption occurred. */
 	EDGETPU_COUNTER_HARDWARE_PREEMPTS = 7,
+	/* Total time(us) spent in saving hw ctx during hw preemption */
+	EDGETPU_COUNTER_HARDWARE_CTX_SAVE_TIME_US = 8,
+	/* Total time(us) spent in waiting to hit scalar fence during hw preemption */
+	EDGETPU_COUNTER_SCALAR_FENCE_WAIT_TIME_US = 9,
+	/* Number of times (firmware)suspend function takes longer than SLA time. */
+	EDGETPU_COUNTER_LONG_SUSPEND = 10,
 
-	EDGETPU_COUNTER_COUNT = 8, /* number of counters above */
+	EDGETPU_COUNTER_COUNT = 11, /* number of counters above */
 };
 
 /* Generic counter. Only reported if it has a value larger than 0. */
@@ -94,9 +100,15 @@ enum edgetpu_usage_max_watermark_type {
 	EDGETPU_MAX_WATERMARK_OUT_CMDS = 0,
 	/* Number of preempted contexts at any given time. */
 	EDGETPU_MAX_WATERMARK_PREEMPT_DEPTH = 1,
+	/* Max time(us) spent in saving hw ctx during hw preemption */
+	EDGETPU_MAX_WATERMARK_HARDWARE_CTX_SAVE_TIME_US = 2,
+	/* Max time(us) spent in waiting to hit scalar fence during hw preemption */
+	EDGETPU_MAX_WATERMARK_SCALAR_FENCE_WAIT_TIME_US = 3,
+	/* Max time(us) spent during (firmware)suspend function. */
+	EDGETPU_MAX_WATERMARK_SUSPEND_TIME_US = 4,
 
 	/* Number of watermark types above */
-	EDGETPU_MAX_WATERMARK_TYPE_COUNT = 2,
+	EDGETPU_MAX_WATERMARK_TYPE_COUNT = 5,
 };
 
 /* Max watermark. Only reported if it has a value larger than 0. */

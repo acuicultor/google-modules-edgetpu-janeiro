@@ -582,6 +582,14 @@ static int edgetpu_ioctl_acquire_wakelock(struct edgetpu_client *client)
 	struct edgetpu_thermal *thermal = client->etdev->thermal;
 
 	LOCK(client);
+	/*
+	 * Update client PID; the client may have been passed from the
+	 * edgetpu service that originally created it to a new process.
+	 * By the time the client holds TPU wakelocks it will have been
+	 * passed to the new owning process.
+	 */
+	client->pid = current->pid;
+	client->tgid = current->tgid;
 	edgetpu_thermal_lock(thermal);
 	if (edgetpu_thermal_is_suspended(thermal)) {
 		/* TPU is thermal suspended, so fail acquiring wakelock */
@@ -629,7 +637,8 @@ static int edgetpu_ioctl_acquire_wakelock(struct edgetpu_client *client)
 	return 0;
 error_unlock:
 	UNLOCK(client);
-	etdev_err(client->etdev, "PID: %d failed to acquire wakelock", client->pid);
+	etdev_err(client->etdev, "client pid %d failed to acquire wakelock",
+		  client->pid);
 	return ret;
 }
 
@@ -658,7 +667,8 @@ edgetpu_ioctl_acquire_ext_mailbox(struct edgetpu_client *client,
 
 	ret = edgetpu_chip_acquire_ext_mailbox(client, &ext_mailbox);
 	if (ret)
-		etdev_err(client->etdev, "PID: %d failed to acquire ext mailbox", client->pid);
+		etdev_err(client->etdev, "client pid %d failed to acquire ext mailbox",
+			  client->pid);
 	return ret;
 }
 
