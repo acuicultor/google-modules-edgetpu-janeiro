@@ -13,16 +13,36 @@
 #include "edgetpu-kci.h"
 #include "edgetpu-usage-stats.h"
 
+/* Max number of frequencies to support */
+#define EDGETPU_MAX_STATES	10
+
 struct uid_entry {
 	int32_t uid;
-	uint64_t time_in_state[EDGETPU_NUM_STATES];
+	uint64_t time_in_state[EDGETPU_MAX_STATES];
 	struct hlist_node node;
 };
 
-static int tpu_state_map(uint32_t state)
+static int tpu_state_map(struct edgetpu_dev *etdev, uint32_t state)
 {
-	int i;
+	int i, idx = 0;
 
+	mutex_lock(&etdev->freq_lock);
+	/* Use frequency table if f/w already reported via usage_stats */
+	if (etdev->freq_table) {
+		for (i = etdev->freq_count - 1; i >= 0; i--) {
+			if (state == etdev->freq_table[i])
+				idx = i;
+		}
+		mutex_unlock(&etdev->freq_lock);
+		return idx;
+	}
+
+	mutex_unlock(&etdev->freq_lock);
+
+	/*
+	 * use predefined state table in case of no f/w reported supported
+	 * frequencies.
+	 */
 	for (i = (EDGETPU_NUM_STATES - 1); i >= 0; i--) {
 		if (state >= edgetpu_active_states[i])
 			return i;
@@ -49,7 +69,7 @@ int edgetpu_usage_add(struct edgetpu_dev *etdev, struct tpu_usage *tpu_usage)
 {
 	struct edgetpu_usage_stats *ustats = etdev->usage_stats;
 	struct uid_entry *uid_entry;
-	int state = tpu_state_map(tpu_usage->power_state);
+	int state = tpu_state_map(etdev, tpu_usage->power_state);
 
 	if (!ustats)
 		return 0;
@@ -186,6 +206,39 @@ static void edgetpu_thread_stats_update(
 	mutex_unlock(&ustats->usage_stats_lock);
 }
 
+/* Record new supported frequencies if reported by firmware */
+static void edgetpu_dvfs_frequency_update(struct edgetpu_dev *etdev, uint32_t frequency)
+{
+	uint32_t *freq_table, i;
+
+	mutex_lock(&etdev->freq_lock);
+	if (!etdev->freq_table) {
+		freq_table = kvmalloc(EDGETPU_MAX_STATES * sizeof(uint32_t), GFP_KERNEL);
+		if (!freq_table) {
+			etdev_warn(etdev, "Unable to create supported frequencies table");
+			goto out;
+		}
+		etdev->freq_count = 0;
+		etdev->freq_table = freq_table;
+	}
+
+	freq_table = etdev->freq_table;
+
+	for (i = 0; i < etdev->freq_count; i++) {
+		if (freq_table[i] == frequency)
+			goto out;
+	}
+
+	if (etdev->freq_count >= EDGETPU_MAX_STATES) {
+		etdev_warn(etdev, "Unable to record supported frequencies");
+		goto out;
+	}
+
+	freq_table[etdev->freq_count++] = frequency;
+out:
+	mutex_unlock(&etdev->freq_lock);
+}
+
 void edgetpu_usage_stats_process_buffer(struct edgetpu_dev *etdev, void *buf)
 {
 	struct edgetpu_usage_header *header = buf;
@@ -220,6 +273,10 @@ void edgetpu_usage_stats_process_buffer(struct edgetpu_dev *etdev, void *buf)
 		case EDGETPU_METRIC_TYPE_THREAD_STATS:
 			edgetpu_thread_stats_update(
 				etdev, &metric->thread_stats);
+			break;
+		case EDGETPU_METRIC_TYPE_DVFS_FREQUENCY_INFO:
+			edgetpu_dvfs_frequency_update(
+				etdev, metric->dvfs_frequency_info);
 			break;
 		default:
 			etdev_dbg(etdev, "%s: %d: skip unknown type=%u",
@@ -294,9 +351,18 @@ static ssize_t tpu_usage_show(struct device *dev,
 	/* uid: state0speed state1speed ... */
 	ret += scnprintf(buf, PAGE_SIZE, "uid:");
 
-	for (i = 0; i < EDGETPU_NUM_STATES; i++)
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret, " %d",
-				 edgetpu_states_display[i]);
+	mutex_lock(&etdev->freq_lock);
+	if (!etdev->freq_table) {
+		mutex_unlock(&etdev->freq_lock);
+		for (i = 0; i < EDGETPU_NUM_STATES; i++)
+			ret += scnprintf(buf + ret, PAGE_SIZE - ret, " %d",
+					 edgetpu_states_display[i]);
+	} else {
+		for (i = 0; i < etdev->freq_count; i++)
+			ret += scnprintf(buf + ret, PAGE_SIZE - ret, " %d",
+					 etdev->freq_table[i]);
+		mutex_unlock(&etdev->freq_lock);
+	}
 
 	ret += scnprintf(buf + ret, PAGE_SIZE - ret, "\n");
 
@@ -877,6 +943,13 @@ void edgetpu_usage_stats_exit(struct edgetpu_dev *etdev)
 	if (ustats) {
 		usage_stats_remove_uids(ustats);
 		device_remove_group(etdev->dev, &usage_stats_attr_group);
+		/* free the frequency table if allocated */
+		mutex_lock(&etdev->freq_lock);
+		if (etdev->freq_table)
+			kvfree(etdev->freq_table);
+		etdev->freq_table = NULL;
+		etdev->freq_count = 0;
+		mutex_unlock(&etdev->freq_lock);
 	}
 
 	etdev_dbg(etdev, "%s exit\n", __func__);

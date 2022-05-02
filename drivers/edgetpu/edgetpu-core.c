@@ -434,6 +434,8 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	etdev->vcid_pool = (1u << EDGETPU_NUM_VCIDS) - 1;
 	mutex_init(&etdev->state_lock);
 	etdev->state = ETDEV_STATE_NOFW;
+	etdev->freq_count = 0;
+	mutex_init(&etdev->freq_lock);
 
 	ret = edgetpu_fs_add(etdev, iface_params, num_ifaces);
 	if (ret) {

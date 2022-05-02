@@ -279,6 +279,38 @@ static void edgetpu_platform_remove_irq(struct edgetpu_mobile_platform_dev *etmd
 		edgetpu_unregister_irq(etdev, etmdev->irq[i]);
 }
 
+/*
+ * Fetch and set the firmware context region from device tree.
+ *
+ * Maybe be unused since not all chips need this.
+ */
+static int __maybe_unused
+edgetpu_mobile_platform_set_fw_ctx_memory(struct edgetpu_mobile_platform_dev *etmdev)
+{
+	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
+	struct device *dev = etdev->dev;
+	struct resource r;
+	struct device_node *np;
+	int ret;
+
+	np = of_parse_phandle(dev->of_node, "memory-region", 1);
+	if (!np) {
+		etdev_warn(etdev, "No memory for firmware contexts");
+		return -ENODEV;
+	}
+
+	ret = of_address_to_resource(np, 0, &r);
+	of_node_put(np);
+	if (ret) {
+		etdev_warn(etdev, "No memory address for firmware contexts");
+		return ret;
+	}
+
+	etmdev->fw_ctx_paddr = r.start;
+	etmdev->fw_ctx_size = resource_size(&r);
+	return 0;
+}
+
 static int edgetpu_mobile_platform_probe(struct platform_device *pdev,
 					 struct edgetpu_mobile_platform_dev *etmdev)
 {

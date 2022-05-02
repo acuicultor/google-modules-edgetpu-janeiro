@@ -150,6 +150,7 @@ enum edgetpu_usage_metric_type {
 	EDGETPU_METRIC_TYPE_COUNTER = 3,
 	EDGETPU_METRIC_TYPE_THREAD_STATS = 4,
 	EDGETPU_METRIC_TYPE_MAX_WATERMARK = 5,
+	EDGETPU_METRIC_TYPE_DVFS_FREQUENCY_INFO = 6,
 };
 
 /*
@@ -165,6 +166,7 @@ struct edgetpu_usage_metric {
 		struct edgetpu_usage_counter counter;
 		struct edgetpu_thread_stats thread_stats;
 		struct edgetpu_usage_max_watermark max_watermark;
+		uint32_t dvfs_frequency_info;
 	};
 };
 
