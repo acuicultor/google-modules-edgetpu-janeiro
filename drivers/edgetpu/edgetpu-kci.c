@@ -38,8 +38,8 @@
 /* fake-firmware could respond in a short time */
 #define KCI_TIMEOUT	(200)
 #else
-/* 5 secs. */
-#define KCI_TIMEOUT	(5000)
+/* Wait for up to 1 second for FW to respond. */
+#define KCI_TIMEOUT	(1000)
 #endif
 
 /* A macro for KCIs to leave early when the device state is known to be bad. */
