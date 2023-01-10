@@ -47,6 +47,8 @@ static inline int exynos_acpm_set_policy(unsigned int id, unsigned long policy)
 enum mobile_reverse_kci_code {
 	RKCI_CODE_PM_QOS = RKCI_CHIP_CODE_FIRST + 1,
 	RKCI_CODE_BTS = RKCI_CHIP_CODE_FIRST + 2,
+	/* The above codes have been deprecated. */
+
 	RKCI_CODE_PM_QOS_BTS = RKCI_CHIP_CODE_FIRST + 3,
 };
 
@@ -68,7 +70,7 @@ enum mobile_reverse_kci_code {
  * chipsets.
  * Needs to be called after the devices's platform_pwr struct has been initialized.
  */
-int mobile_pm_create(struct edgetpu_dev *etdev);
+int edgetpu_mobile_pm_create(struct edgetpu_dev *etdev);
 
 /*
  * Wrapper for chip-specific implementation.
@@ -79,12 +81,12 @@ int edgetpu_chip_pm_create(struct edgetpu_dev *etdev);
 /*
  * Destroy power management interface for an edgetpu device on mobile chipsets.
  */
-void mobile_pm_destroy(struct edgetpu_dev *etdev);
+void edgetpu_mobile_pm_destroy(struct edgetpu_dev *etdev);
 
 /* Set required QoS value for the edgetpu device. */
-void mobile_pm_set_pm_qos(struct edgetpu_dev *etdev, u32 pm_qos_val);
+void edgetpu_mobile_pm_set_pm_qos(struct edgetpu_dev *etdev, u32 pm_qos_val);
 
 /* Set BTS value for the edgetpu device. */
-void mobile_pm_set_bts(struct edgetpu_dev *etdev, u16 bts_val);
+void edgetpu_mobile_pm_set_bts(struct edgetpu_dev *etdev, u16 bts_val);
 
 #endif /* __MOBILE_PM_H__ */

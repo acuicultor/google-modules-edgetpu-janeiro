@@ -281,35 +281,6 @@ static int mobile_firmware_gsa_authenticate(struct edgetpu_mobile_platform_dev *
 	return ret;
 }
 
-/* TODO(b/197074886): remove once rio has GSA support */
-static void program_iremap_csr(struct edgetpu_dev *etdev)
-{
-	const int ctx_id = 0, sid0 = 0x30, sid1 = 0x34;
-	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
-	phys_addr_t fw_paddr = etmdev->fw_region_paddr;
-
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_SECURITY, (ctx_id << 16) | sid0);
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_SECURITY + 8,
-			     (ctx_id << 16) | sid1);
-#if defined(ZEBU_SYSMMU_WORKAROUND)
-	/*
-	 * This is required on ZeBu after b/197718405 is fixed, which forwards all transactions to
-	 * the non-secure SysMMU.
-	 */
-	fw_paddr = EDGETPU_INSTRUCTION_REMAP_BASE;
-#endif
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_NEW_BASE, fw_paddr);
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_NEW_BASE + 8, fw_paddr);
-
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_LIMIT,
-			     EDGETPU_INSTRUCTION_REMAP_BASE + SZ_16M);
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_LIMIT + 8,
-			     EDGETPU_INSTRUCTION_REMAP_BASE + SZ_16M);
-
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_CONTROL, 1);
-	edgetpu_dev_write_32(etdev, EDGETPU_REG_INSTRUCTION_REMAP_CONTROL + 8, 1);
-}
-
 static void mobile_firmware_setup_ssmt(struct edgetpu_dev *etdev)
 {
 	int i;
@@ -331,8 +302,6 @@ static void mobile_firmware_setup_ssmt(struct edgetpu_dev *etdev)
 	 * Reset the table to zeroes if running non-secure firmware, since the SSMT
 	 * will be in clamped mode and we want all memory accesses to go to the
 	 * default page table.
-	 *
-	 * TODO(b/204384254) Confirm SSMT setup for Rio
 	 */
 	for (i = 0; i < EDGETPU_NCONTEXTS; i++) {
 		int val;
@@ -354,9 +323,6 @@ static int mobile_firmware_prepare_run(struct edgetpu_firmware *et_fw,
 
 	/* Reset KCI mailbox before starting f/w, don't process anything old.*/
 	edgetpu_mailbox_reset(etdev->kci->mailbox);
-
-	if (IS_ENABLED(CONFIG_RIO))
-		program_iremap_csr(etdev);
 
 	mobile_firmware_setup_ssmt(etdev);
 
@@ -390,6 +356,7 @@ static int mobile_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	phys_addr_t image_start, image_end, carveout_start, carveout_end;
 	bool image_config_changed;
+	struct mobile_image_header *hdr;
 
 	if (fw_buf->used_size < MOBILE_FW_HEADER_SIZE) {
 		etdev_err(etdev, "Invalid buffer size: %zu < %d\n",
@@ -403,6 +370,11 @@ static int mobile_firmware_setup_buffer(struct edgetpu_firmware *et_fw,
 		etdev_err(etdev, "memremap failed\n");
 		return -ENOMEM;
 	}
+
+	hdr = (struct mobile_image_header *)fw_buf->vaddr;
+	if (hdr->Magic != EDGETPU_MOBILE_FW_MAGIC)
+		etdev_warn(etdev, "Invalid firmware header magic value %#08x\n",
+			   hdr->Magic);
 
 	/* fetch the firmware versions */
 	image_config = fw_buf->vaddr + MOBILE_IMAGE_CONFIG_OFFSET;

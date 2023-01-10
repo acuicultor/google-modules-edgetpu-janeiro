@@ -22,7 +22,6 @@
 #define BOOTUP_DELAY_US_MIN		200
 #define BOOTUP_DELAY_US_MAX		250
 #define SHUTDOWN_MAX_DELAY_COUNT	1000
-#define SHUTDOWN_EXPECTED_DELAY_COUNT	50
 
 #define EDGETPU_PSM0_CFG 0x1c1880
 #define EDGETPU_PSM0_START 0x1c1884
@@ -93,26 +92,39 @@ static int janeiro_lpm_up(struct edgetpu_dev *etdev)
 	return 0;
 }
 
-static void janeiro_block_down(struct edgetpu_dev *etdev)
+static int get_blk_status_by_reg(struct edgetpu_mobile_platform_dev *etmdev)
 {
+	return readl(etmdev->pmu_status);
+}
+
+static int get_blk_status_by_acpm(struct edgetpu_mobile_platform_dev *etmdev)
+{
+	/* Check BLK status instead of CLK rate */
+	return exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 1);
+}
+
+static bool janeiro_is_block_down(struct edgetpu_dev *etdev)
+{
+	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	int timeout_cnt = 0;
 	int curr_state;
+	int (*status)(struct edgetpu_mobile_platform_dev *etmdev);
+
+	if (etmdev->pmu_status)
+		status = get_blk_status_by_reg;
+	else
+		status = get_blk_status_by_acpm;
 
 	do {
 		/* Delay 20us per retry till blk shutdown finished */
 		usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
-		/* Only poll for BLK status instead of CLK rate */
-		curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 1);
+		curr_state = status(etmdev);
 		if (!curr_state)
-			break;
+			return true;
 		timeout_cnt++;
 	} while (timeout_cnt < SHUTDOWN_MAX_DELAY_COUNT);
-	if (timeout_cnt == SHUTDOWN_MAX_DELAY_COUNT)
-		etdev_warn(etdev, "%s: blk_shutdown timeout (%d uS) exceeded\n", __func__,
-			   SHUTDOWN_MAX_DELAY_COUNT * SHUTDOWN_DELAY_US_MAX);
-	else if (timeout_cnt > SHUTDOWN_EXPECTED_DELAY_COUNT)
-		etdev_info(etdev, "%s: excessive shutdown time (%d uS)", __func__,
-			   timeout_cnt * SHUTDOWN_DELAY_US_MAX);
+
+	return false;
 }
 
 static void janeiro_firmware_down(struct edgetpu_dev *etdev)
@@ -138,9 +150,9 @@ int edgetpu_chip_pm_create(struct edgetpu_dev *etdev)
 
 	platform_pwr->lpm_up = janeiro_lpm_up;
 	platform_pwr->lpm_down = janeiro_lpm_down;
-	platform_pwr->block_down = janeiro_block_down;
+	platform_pwr->is_block_down = janeiro_is_block_down;
 	platform_pwr->firmware_down = janeiro_firmware_down;
 	platform_pwr->acpm_set_rate = janeiro_acpm_set_rate;
 
-	return mobile_pm_create(etdev);
+	return edgetpu_mobile_pm_create(etdev);
 }

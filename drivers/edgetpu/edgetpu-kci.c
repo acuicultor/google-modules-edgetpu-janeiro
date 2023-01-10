@@ -246,10 +246,9 @@ edgetpu_kci_handle_response(struct edgetpu_kci *kci,
 		int ret = edgetpu_reverse_kci_add_response(kci, resp);
 
 		if (ret)
-			etdev_warn(
-				kci->mailbox->etdev,
-				"Failed to handle reverse KCI code %u (%d)\n",
-				resp->code, ret);
+			etdev_warn_ratelimited(kci->mailbox->etdev,
+					       "Failed to handle reverse KCI code %u (%d)\n",
+					       resp->code, ret);
 		return;
 	}
 	/*
@@ -642,7 +641,12 @@ int edgetpu_kci_push_cmd(struct edgetpu_kci *kci,
 
 	mutex_lock(&kci->cmd_queue_lock);
 
-	cmd->seq = kci->cur_seq;
+	/*
+	 * Only update sequence number for KCI commands.  Do not change
+	 * sequence number for responses to RKCI commands.
+	 */
+	if (!(cmd->seq & KCI_REVERSE_FLAG))
+		cmd->seq = kci->cur_seq;
 	/*
 	 * The lock ensures mailbox->cmd_queue_tail cannot be changed by
 	 * other processes (this method should be the only one to modify the
@@ -681,7 +685,8 @@ int edgetpu_kci_push_cmd(struct edgetpu_kci *kci,
 	/* triggers doorbell */
 	EDGETPU_MAILBOX_CMD_QUEUE_WRITE_SYNC(kci->mailbox, doorbell_set, 1);
 	/* bumps sequence number after the command is sent */
-	kci->cur_seq++;
+	if (!(cmd->seq & KCI_REVERSE_FLAG))
+		kci->cur_seq++;
 	ret = 0;
 out:
 	mutex_unlock(&kci->cmd_queue_lock);
@@ -707,6 +712,10 @@ static int edgetpu_kci_send_cmd_return_resp(
 	ret = edgetpu_kci_push_cmd(kci, cmd, resp);
 	if (ret)
 		return ret;
+
+	if (!resp)
+		return 0;
+
 	ret = wait_event_timeout(kci->wait_list_waitq,
 				 resp->status != KCI_STATUS_WAITING_RESPONSE,
 				 msecs_to_jiffies(KCI_TIMEOUT));
@@ -755,22 +764,11 @@ int edgetpu_kci_send_cmd(struct edgetpu_kci *kci,
 {
 	struct edgetpu_kci_response_element resp;
 
-	return edgetpu_kci_send_cmd_return_resp(kci, cmd, &resp);
-}
-
-int edgetpu_kci_unmap_buffer(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
-			     u32 size, enum dma_data_direction dir)
-{
-	struct edgetpu_command_element cmd = {
-		.code = KCI_CODE_UNMAP_BUFFER,
-		.dma = {
-			.address = tpu_addr,
-			.size = size,
-			.flags = dir,
-		},
-	};
-
-	return edgetpu_kci_send_cmd(kci, &cmd);
+	/* Don't wait on a response for reverse KCI response. */
+	if (cmd->seq & KCI_REVERSE_FLAG)
+		return edgetpu_kci_send_cmd_return_resp(kci, cmd, NULL);
+	else
+		return edgetpu_kci_send_cmd_return_resp(kci, cmd, &resp);
 }
 
 int edgetpu_kci_map_log_buffer(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
@@ -926,6 +924,9 @@ int edgetpu_kci_update_usage(struct edgetpu_dev *etdev)
 
 fw_unlock:
 	edgetpu_firmware_unlock(etdev);
+
+	if (ret)
+		etdev_warn_once(etdev, "get firmware usage stats failed: %d", ret);
 	return ret;
 }
 
@@ -1084,6 +1085,20 @@ int edgetpu_kci_block_bus_speed_control(struct edgetpu_dev *etdev, bool block)
 		.dma = {
 			.flags = (u32) block,
 		},
+	};
+
+	if (!etdev->kci)
+		return -ENODEV;
+
+	return edgetpu_kci_send_cmd(etdev->kci, &cmd);
+}
+
+int edgetpu_kci_resp_rkci_ack(struct edgetpu_dev *etdev,
+			      struct edgetpu_kci_response_element *rkci_cmd)
+{
+	struct edgetpu_command_element cmd = {
+		.seq = rkci_cmd->seq,
+		.code = KCI_CODE_RKCI_ACK,
 	};
 
 	if (!etdev->kci)

@@ -27,6 +27,7 @@
 #include "edgetpu-async.h"
 #include "edgetpu-config.h"
 #include "edgetpu-device-group.h"
+#include "edgetpu-dmabuf.h"
 #include "edgetpu-dram.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-iremap-pool.h"
@@ -505,6 +506,8 @@ static void edgetpu_device_group_release(struct edgetpu_device_group *group)
 		edgetpu_mmu_detach_domain(group->etdev, group->etdomain);
 		edgetpu_mmu_free_domain(group->etdev, group->etdomain);
 	}
+	/* Signal any unsignaled dma fences owned by the group with an error. */
+	edgetpu_sync_fence_group_shutdown(group);
 	group->status = EDGETPU_DEVICE_GROUP_DISBANDED;
 }
 
@@ -721,6 +724,7 @@ edgetpu_device_group_alloc(struct edgetpu_client *client,
 	group->vii.etdev = client->etdev;
 	mutex_init(&group->lock);
 	rwlock_init(&group->events.lock);
+	INIT_LIST_HEAD(&group->dma_fence_list);
 	edgetpu_mapping_init(&group->host_mappings);
 	edgetpu_mapping_init(&group->dmabuf_mappings);
 	group->mbox_attr = *attr;
@@ -1174,12 +1178,9 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 		return ERR_PTR(-EFAULT);
 	}
 	offset = host_addr & (PAGE_SIZE - 1);
-	/* overflow check (should also be caught by access_ok) */
-	if (unlikely((size + offset) / PAGE_SIZE >= UINT_MAX - 1 || size + offset < size)) {
-		etdev_err(etdev, "address overflow in buffer map request");
-		return ERR_PTR(-EFAULT);
-	}
 	num_pages = DIV_ROUND_UP((size + offset), PAGE_SIZE);
+	if (num_pages * PAGE_SIZE < size + offset)
+		return ERR_PTR(-EINVAL);
 	etdev_dbg(etdev, "%s: hostaddr=%#llx pages=%u", __func__, host_addr, num_pages);
 	/*
 	 * "num_pages" is decided from user-space arguments, don't show warnings
@@ -1196,6 +1197,11 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	 * it with FOLL_WRITE.
 	 * default to read/write if find_extend_vma returns NULL
 	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
+	down_read(&current->mm->mmap_sem);
+#else
+	mmap_read_lock(current->mm);
+#endif
 	vma = find_extend_vma(current->mm, host_addr & PAGE_MASK);
 	if (vma && !(vma->vm_flags & VM_WRITE)) {
 		foll_flags &= ~FOLL_WRITE;
@@ -1203,6 +1209,11 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 	} else {
 		*preadonly = false;
 	}
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
+	up_read(&current->mm->mmap_sem);
+#else
+	mmap_read_unlock(current->mm);
+#endif
 
 	/* Try fast call first, in case it's actually faster. */
 	ret = pin_user_pages_fast(host_addr & PAGE_MASK, num_pages, foll_flags,
@@ -1265,6 +1276,8 @@ static struct page **edgetpu_pin_user_pages(struct edgetpu_device_group *group,
 			  "pin_user_pages partial %u:%pK npages=%u pinned=%d",
 			  group->workload_id, (void *)host_addr, num_pages,
 			  ret);
+		etdev_err(etdev, "can only lock %u of %u pages requested",
+			  (unsigned int)ret, num_pages);
 		num_pages = ret;
 		ret = -EFAULT;
 		goto error;

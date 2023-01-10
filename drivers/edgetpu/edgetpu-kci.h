@@ -60,7 +60,11 @@ struct edgetpu_dma_descriptor {
 };
 
 struct edgetpu_command_element {
-	u64 seq;	 /* set by edgetpu_kci_push_cmd() */
+	/*
+	 * Set by edgetpu_kci_push_cmd() in case of KCI cmd and copied from
+	 * the RKCI cmd in case of RKCI response.
+	 */
+	u64 seq;
 	u16 code;
 	u16 reserved[3]; /* explicit padding, does not affect alignment */
 	struct edgetpu_dma_descriptor dma;
@@ -72,7 +76,8 @@ struct edgetpu_kci_response_element {
 	/*
 	 * Reserved for host use - firmware can't touch this.
 	 * If a value is written here it will be discarded and overwritten
-	 * during response processing.
+	 * during response processing. However, when repurposed as an RKCI
+	 * command, the FW can set this field.
 	 */
 	u16 status;
 	/*
@@ -110,6 +115,8 @@ enum edgetpu_kci_code {
 	KCI_CODE_GET_USAGE = 12,
 	KCI_CODE_NOTIFY_THROTTLING = 13,
 	KCI_CODE_BLOCK_BUS_SPEED_CONTROL = 14,
+
+	KCI_CODE_RKCI_ACK = 256,
 };
 
 /*
@@ -284,14 +291,6 @@ int edgetpu_kci_send_cmd(struct edgetpu_kci *kci,
 			 struct edgetpu_command_element *cmd);
 
 /*
- * Sends the "Unmap Buffer Sync" command and waits for remote response.
- *
- * Returns the code of response, or a negative errno on error.
- */
-int edgetpu_kci_unmap_buffer(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
-			     u32 size, enum dma_data_direction dir);
-
-/*
  * Sends a FIRMWARE_INFO command and expects a response with a
  * edgetpu_fw_info struct filled out, including what firmware type is running,
  * along with build CL and time.
@@ -404,5 +403,15 @@ int edgetpu_kci_notify_throttling(struct edgetpu_dev *etdev, u32 level);
  * Used to prevent conflicts when sending a thermal policy request
  */
 int edgetpu_kci_block_bus_speed_control(struct edgetpu_dev *etdev, bool block);
+
+/*
+ * Send an ack to the FW after handling a reverse KCI request.
+ *
+ * The FW may wait for a response from the kernel for an RKCI request so a
+ * response could be sent as an ack.
+ */
+int edgetpu_kci_resp_rkci_ack(struct edgetpu_dev *etdev,
+			      struct edgetpu_kci_response_element *rkci_cmd);
+
 
 #endif /* __EDGETPU_KCI_H__ */

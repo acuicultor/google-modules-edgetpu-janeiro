@@ -75,6 +75,9 @@ struct mobile_image_header {
 	struct mobile_image_config ImageConfig;
 };
 
+/* Value of Magic field above: 'TPUF' as a 32-bit LE int */
+#define EDGETPU_MOBILE_FW_MAGIC	0x46555054
+
 int edgetpu_mobile_firmware_create(struct edgetpu_dev *etdev);
 void edgetpu_mobile_firmware_destroy(struct edgetpu_dev *etdev);
 
