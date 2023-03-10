@@ -934,7 +934,7 @@ int edgetpu_kci_update_usage_locked(struct edgetpu_dev *etdev)
 {
 #define EDGETPU_USAGE_BUFFER_SIZE	4096
 	struct edgetpu_command_element cmd = {
-		.code = KCI_CODE_GET_USAGE,
+		.code = KCI_CODE_GET_USAGE_V2,
 		.dma = {
 			.address = 0,
 			.size = 0,
@@ -954,13 +954,22 @@ int edgetpu_kci_update_usage_locked(struct edgetpu_dev *etdev)
 		return ret;
 	}
 
+	/* TODO(b/271372136): remove v1 when v1 firmware no longer in use. */
+retry_v1:
+	if (etdev->usage_stats && etdev->usage_stats->use_metrics_v1)
+		cmd.code = KCI_CODE_GET_USAGE_V1;
 	cmd.dma.address = mem.tpu_addr;
 	cmd.dma.size = EDGETPU_USAGE_BUFFER_SIZE;
 	memset(mem.vaddr, 0, sizeof(struct edgetpu_usage_header));
 	ret = edgetpu_kci_send_cmd_return_resp(etdev->kci, &cmd, &resp);
 
-	if (ret == KCI_ERROR_UNIMPLEMENTED || ret == KCI_ERROR_UNAVAILABLE)
+	if (ret == KCI_ERROR_UNIMPLEMENTED || ret == KCI_ERROR_UNAVAILABLE) {
+		if (etdev->usage_stats && !etdev->usage_stats->use_metrics_v1) {
+			etdev->usage_stats->use_metrics_v1 = true;
+			goto retry_v1;
+		}
 		etdev_dbg(etdev, "firmware does not report usage\n");
+	}
 	else if (ret == KCI_ERROR_OK)
 		edgetpu_usage_stats_process_buffer(etdev, mem.vaddr);
 	else if (ret != -ETIMEDOUT)

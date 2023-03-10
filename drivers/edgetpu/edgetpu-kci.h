@@ -112,11 +112,14 @@ enum edgetpu_kci_code {
 	KCI_CODE_OPEN_DEVICE = 9,
 	KCI_CODE_CLOSE_DEVICE = 10,
 	KCI_CODE_FIRMWARE_INFO = 11,
-	KCI_CODE_GET_USAGE = 12,
+	/* TODO(b/271372136): remove v1 when v1 firmware no longer in use. */
+	KCI_CODE_GET_USAGE_V1 = 12,
 	KCI_CODE_NOTIFY_THROTTLING = 13,
 	KCI_CODE_BLOCK_BUS_SPEED_CONTROL = 14,
 	/* 15..18 not implemented in this branch */
 	KCI_CODE_FIRMWARE_TRACING_LEVEL = 19,
+	/* 20 not implemented in this branch */
+	KCI_CODE_GET_USAGE_V2 = 21,
 
 	KCI_CODE_RKCI_ACK = 256,
 };

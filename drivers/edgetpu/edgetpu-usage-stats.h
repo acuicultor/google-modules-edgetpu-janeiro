@@ -11,7 +11,7 @@
 #include <linux/mutex.h>
 
 /* The highest version of usage metrics handled by this driver. */
-#define EDGETPU_USAGE_METRIC_VERSION	1
+#define EDGETPU_USAGE_METRIC_VERSION	2
 
 /*
  * Size in bytes of usage metric v1.
@@ -66,9 +66,12 @@ struct tpu_usage {
 enum edgetpu_usage_component {
 	/* The device as a whole */
 	EDGETPU_USAGE_COMPONENT_DEVICE = 0,
-	/* Just the TPU core */
+	/* Just the TPU core (scalar core and tiles) */
 	EDGETPU_USAGE_COMPONENT_TPU = 1,
-	EDGETPU_USAGE_COMPONENT_COUNT = 2, /* number of components above */
+	/* Control core (ARM Cortex-R52 CPU) */
+	EDGETPU_USAGE_COMPONENT_CONTROLCORE = 2,
+
+	EDGETPU_USAGE_COMPONENT_COUNT = 3, /* number of components above */
 };
 
 /*
@@ -169,10 +172,11 @@ struct __packed edgetpu_usage_max_watermark {
 /* An enum to identify the tracked firmware threads. */
 /* Must be kept in sync with firmware enum class UsageTrackerThreadId. */
 enum edgetpu_usage_threadid {
-	/* Individual thread IDs are not tracked. */
+	/* Individual thread IDs do not have identifiers assigned. */
+	/* Thread ID 14, used for other IP, is not used for TPU */
 
 	/* Number of task identifiers. */
-	EDGETPU_FW_THREAD_COUNT = 12,
+	EDGETPU_FW_THREAD_COUNT = 14,
 };
 
 /* Statistics related to a single thread in firmware. */
@@ -216,6 +220,8 @@ struct edgetpu_usage_metric {
 #define UID_HASH_BITS 3
 
 struct edgetpu_usage_stats {
+	/* if true the current firmware only implements metrics V1 */
+	bool use_metrics_v1;
 	DECLARE_HASHTABLE(uid_hash_table, UID_HASH_BITS);
 	/* component utilization values reported by firmware */
 	int32_t component_utilization[EDGETPU_USAGE_COMPONENT_COUNT];
