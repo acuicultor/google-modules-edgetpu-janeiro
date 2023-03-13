@@ -115,6 +115,8 @@ enum edgetpu_kci_code {
 	KCI_CODE_GET_USAGE = 12,
 	KCI_CODE_NOTIFY_THROTTLING = 13,
 	KCI_CODE_BLOCK_BUS_SPEED_CONTROL = 14,
+	/* 15..18 not implemented in this branch */
+	KCI_CODE_FIRMWARE_TRACING_LEVEL = 19,
 
 	KCI_CODE_RKCI_ACK = 256,
 };
@@ -403,6 +405,10 @@ int edgetpu_kci_notify_throttling(struct edgetpu_dev *etdev, u32 level);
  * Used to prevent conflicts when sending a thermal policy request
  */
 int edgetpu_kci_block_bus_speed_control(struct edgetpu_dev *etdev, bool block);
+
+/* Set the firmware tracing level. */
+int edgetpu_kci_firmware_tracing_level(struct edgetpu_dev *etdev, unsigned long level,
+				       unsigned long *active_level);
 
 /*
  * Send an ack to the FW after handling a reverse KCI request.

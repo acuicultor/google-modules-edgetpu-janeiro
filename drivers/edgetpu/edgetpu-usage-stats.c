@@ -241,18 +241,21 @@ out:
 
 void edgetpu_usage_stats_process_buffer(struct edgetpu_dev *etdev, void *buf)
 {
-	struct edgetpu_usage_header *header = buf;
+	struct edgetpu_usage_header_v1 *header = buf;
 	struct edgetpu_usage_metric *metric =
 		(struct edgetpu_usage_metric *)(header + 1);
 	int i;
 
 	etdev_dbg(etdev, "%s: n=%u sz=%u", __func__,
 		  header->num_metrics, header->metric_size);
-	if (header->metric_size != sizeof(struct edgetpu_usage_metric)) {
-		etdev_dbg(etdev, "%s: expected sz=%zu, discard", __func__,
-			  sizeof(struct edgetpu_usage_metric));
+	if (header->metric_size < EDGETPU_USAGE_METRIC_SIZE_V1) {
+		etdev_warn_once(etdev, "fw metric size %u less than minimum %u",
+				header->metric_size, EDGETPU_USAGE_METRIC_SIZE_V1);
 		return;
 	}
+
+	if (header->metric_size > sizeof(struct edgetpu_usage_metric))
+		etdev_dbg(etdev, "fw metrics are later version with unknown fields");
 
 	for (i = 0; i < header->num_metrics; i++) {
 		switch (metric->type) {
@@ -284,7 +287,7 @@ void edgetpu_usage_stats_process_buffer(struct edgetpu_dev *etdev, void *buf)
 			break;
 		}
 
-		metric++;
+		metric = (struct edgetpu_usage_metric *)((char *)metric + header->metric_size);
 	}
 }
 

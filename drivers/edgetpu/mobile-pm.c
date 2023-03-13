@@ -64,6 +64,7 @@ static int mobile_pwr_state_init(struct device *dev)
 		ret = pm_runtime_get_sync(dev);
 		if (ret) {
 			pm_runtime_put_noidle(dev);
+			pm_runtime_disable(dev);
 			dev_err(dev, "pm_runtime_get_sync returned %d\n", ret);
 			return ret;
 		}
@@ -74,6 +75,7 @@ static int mobile_pwr_state_init(struct device *dev)
 		dev_err(dev, "error initializing tpu state: %d\n", ret);
 		if (curr_state > TPU_OFF)
 			pm_runtime_put_sync(dev);
+		pm_runtime_disable(dev);
 		return ret;
 	}
 
@@ -603,6 +605,7 @@ static int mobile_pm_after_create(struct edgetpu_pm *etpm)
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	struct device *dev = etdev->dev;
 	struct edgetpu_mobile_platform_pwr *platform_pwr = &etmdev->platform_pwr;
+	int curr_state;
 
 	ret = mobile_pwr_state_init(dev);
 	if (ret)
@@ -644,7 +647,19 @@ static int mobile_pm_after_create(struct edgetpu_pm *etpm)
 
 	if (platform_pwr->after_create)
 		ret = platform_pwr->after_create(etdev);
+	if (ret)
+		goto err_debugfs_remove;
 
+	return 0;
+
+err_debugfs_remove:
+	debugfs_remove_recursive(platform_pwr->debugfs_dir);
+	/* pm_runtime_{enable,get_sync} were called in mobile_pwr_state_init */
+
+	curr_state = exynos_acpm_get_rate(TPU_ACPM_DOMAIN, 0);
+	if (curr_state > TPU_OFF)
+		pm_runtime_put_sync(dev);
+	pm_runtime_disable(dev);
 	return ret;
 }
 

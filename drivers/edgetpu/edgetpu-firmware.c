@@ -5,6 +5,7 @@
  * Copyright (C) 2019-2020 Google, Inc.
  */
 
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
@@ -29,6 +30,30 @@
 static char *firmware_name;
 module_param(firmware_name, charp, 0660);
 
+/*
+ * Any tracing level vote with the following bit set will be considered as a default vote.
+ */
+#define EDGETPU_FW_TRACING_DEFAULT_VOTE BIT(8)
+
+struct edgetpu_fw_tracing {
+	struct device *dev;
+	struct dentry *dentry;
+
+	/*
+	 * Lock to protect the struct members listed below.
+	 *
+	 * Note that since the request of tracing level adjusting might happen during power state
+	 * transitions (i.e., another thread calling edgetpu_firmware_tracing_restore_on_powering()
+	 * with pm lock held), one must either use the non-blocking edgetpu_pm_trylock() or make
+	 * sure there won't be any new power transition after holding this lock to prevent deadlock.
+	 */
+	struct mutex lock;
+	/* Actual firmware tracing level. */
+	unsigned long active_level;
+	/* Requested firmware tracing level. */
+	unsigned long request_level;
+};
+
 struct edgetpu_firmware_private {
 	const struct edgetpu_firmware_chip_data *chip_fw;
 	void *data; /* for edgetpu_firmware_(set/get)_data */
@@ -38,6 +63,7 @@ struct edgetpu_firmware_private {
 	struct edgetpu_firmware_desc bl1_fw_desc;
 	enum edgetpu_firmware_status status;
 	struct edgetpu_fw_info fw_info;
+	struct edgetpu_fw_tracing fw_tracing;
 };
 
 void edgetpu_firmware_set_data(struct edgetpu_firmware *et_fw, void *data)
@@ -134,6 +160,124 @@ static char *fw_flavor_str(enum edgetpu_fw_flavor fw_flavor)
 	return "?";
 }
 
+static int edgetpu_firmware_tracing_active_get(void *data, u64 *val)
+{
+	struct edgetpu_firmware *et_fw = data;
+	struct edgetpu_fw_tracing *fw_tracing = &et_fw->p->fw_tracing;
+
+	mutex_lock(&fw_tracing->lock);
+	*val = fw_tracing->active_level;
+	mutex_unlock(&fw_tracing->lock);
+
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_edgetpu_firmware_tracing_active, edgetpu_firmware_tracing_active_get,
+			 NULL, "%llu\n");
+
+static int edgetpu_firmware_tracing_request_get(void *data, u64 *val)
+{
+	struct edgetpu_firmware *et_fw = data;
+	struct edgetpu_fw_tracing *fw_tracing = &et_fw->p->fw_tracing;
+
+	mutex_lock(&fw_tracing->lock);
+	*val = fw_tracing->request_level;
+	mutex_unlock(&fw_tracing->lock);
+
+	return 0;
+}
+
+/*
+ * fw_tracing->lock may optionally be held if the caller wants the new level to be set as a
+ * critical section.  If not held the caller is syncing current tracing level but not as a critical
+ * section with the calling code.  Firmware tracing levels are not expected to change frequently or
+ * via concurrent requests.  Only the code that restore the tracing level at power up requires
+ * consistency with the state managed by the calling code.  Since this code is called as part of
+ * power up processing, in order to avoid deadlocks, most callers set a requested state and then
+ * sync the current state to firmware (if powered on) without holding the lock across the powered-on
+ * check, with no harm done if the requested state changed again using a concurrent request.
+ */
+static int edgetpu_firmware_tracing_set_level(struct edgetpu_firmware *et_fw)
+{
+	unsigned long active_level;
+	struct edgetpu_dev *etdev = et_fw->etdev;
+	struct edgetpu_fw_tracing *fw_tracing = &et_fw->p->fw_tracing;
+	int ret = edgetpu_kci_firmware_tracing_level(etdev, fw_tracing->request_level,
+						     &active_level);
+
+	if (ret)
+		etdev_warn(et_fw->etdev, "Failed to set firmware tracing level to %lu: %d",
+			   fw_tracing->request_level, ret);
+	else
+		fw_tracing->active_level =
+			(fw_tracing->request_level & EDGETPU_FW_TRACING_DEFAULT_VOTE) ?
+				EDGETPU_FW_TRACING_DEFAULT_VOTE : active_level;
+
+	return ret;
+}
+
+static int edgetpu_firmware_tracing_request_set(void *data, u64 val)
+{
+	struct edgetpu_firmware *et_fw = data;
+	struct edgetpu_dev *etdev = et_fw->etdev;
+	struct edgetpu_fw_tracing *fw_tracing = &et_fw->p->fw_tracing;
+	int ret = 0;
+
+	mutex_lock(&fw_tracing->lock);
+	fw_tracing->request_level = val;
+	mutex_unlock(&fw_tracing->lock);
+
+	if (edgetpu_pm_get_if_powered(etdev->pm)) {
+		ret = edgetpu_firmware_tracing_set_level(et_fw);
+		edgetpu_pm_put(etdev->pm);
+	}
+
+	return ret;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_edgetpu_firmware_tracing_request,
+			 edgetpu_firmware_tracing_request_get, edgetpu_firmware_tracing_request_set,
+			 "%llu\n");
+
+static void edgetpu_firmware_tracing_init(struct edgetpu_firmware *et_fw)
+{
+	struct edgetpu_dev *etdev = et_fw->etdev;
+	struct edgetpu_fw_tracing *fw_tracing = &et_fw->p->fw_tracing;
+
+	fw_tracing->active_level = EDGETPU_FW_TRACING_DEFAULT_VOTE;
+	fw_tracing->request_level = EDGETPU_FW_TRACING_DEFAULT_VOTE;
+	mutex_init(&fw_tracing->lock);
+
+	fw_tracing->dentry = debugfs_create_dir("fw_tracing", etdev->d_entry);
+	if (IS_ERR(fw_tracing->dentry)) {
+		etdev_warn(etdev, "Failed to create fw tracing debugfs interface");
+		return;
+	}
+
+	debugfs_create_file("active", 0440, fw_tracing->dentry, et_fw,
+			    &fops_edgetpu_firmware_tracing_active);
+	debugfs_create_file("request", 0660, fw_tracing->dentry, et_fw,
+			    &fops_edgetpu_firmware_tracing_request);
+}
+
+static void edgetpu_firmware_tracing_destroy(struct edgetpu_firmware *et_fw)
+{
+	debugfs_remove_recursive(et_fw->p->fw_tracing.dentry);
+}
+
+static int edgetpu_firmware_tracing_restore_on_powering(struct edgetpu_firmware *et_fw)
+{
+	int ret = 0;
+	struct edgetpu_fw_tracing *fw_tracing = &et_fw->p->fw_tracing;
+
+	mutex_lock(&fw_tracing->lock);
+	fw_tracing->active_level = EDGETPU_FW_TRACING_DEFAULT_VOTE;
+	if (!(fw_tracing->request_level & EDGETPU_FW_TRACING_DEFAULT_VOTE))
+		ret = edgetpu_firmware_tracing_set_level(et_fw);
+	mutex_unlock(&fw_tracing->lock);
+	return ret;
+}
+
 static int edgetpu_firmware_handshake(struct edgetpu_firmware *et_fw)
 {
 	struct edgetpu_dev *etdev = et_fw->etdev;
@@ -172,6 +316,9 @@ static int edgetpu_firmware_handshake(struct edgetpu_firmware *et_fw)
 
 		if (ret)
 			etdev_warn(etdev, "telemetry KCI error: %d", ret);
+		ret = edgetpu_firmware_tracing_restore_on_powering(et_fw);
+		if (ret)
+			etdev_warn_ratelimited(etdev, "firmware tracing restore error: %d", ret);
 		/* Set debug dump buffer in FW */
 		edgetpu_get_debug_dump(etdev, 0);
 	}
@@ -687,6 +834,7 @@ int edgetpu_firmware_create(struct edgetpu_dev *etdev,
 	else
 		edgetpu_sw_wdt_set_handler(
 			etdev, edgetpu_firmware_wdt_timeout_action, etdev);
+	edgetpu_firmware_tracing_init(et_fw);
 	return 0;
 
 out_device_remove_group:
@@ -724,6 +872,7 @@ void edgetpu_firmware_destroy(struct edgetpu_dev *etdev)
 		edgetpu_firmware_unload_locked(et_fw, &et_fw->p->fw_desc);
 		edgetpu_firmware_unload_locked(et_fw, &et_fw->p->bl1_fw_desc);
 		mutex_unlock(&et_fw->p->fw_desc_lock);
+		edgetpu_firmware_tracing_destroy(et_fw);
 	}
 
 	etdev->firmware = NULL;

@@ -938,6 +938,7 @@ int edgetpu_kci_update_usage_locked(struct edgetpu_dev *etdev)
 		.dma = {
 			.address = 0,
 			.size = 0,
+			.flags = EDGETPU_USAGE_METRIC_VERSION,
 		},
 	};
 	struct edgetpu_coherent_mem mem;
@@ -1091,6 +1092,25 @@ int edgetpu_kci_block_bus_speed_control(struct edgetpu_dev *etdev, bool block)
 		return -ENODEV;
 
 	return edgetpu_kci_send_cmd(etdev->kci, &cmd);
+}
+
+int edgetpu_kci_firmware_tracing_level(struct edgetpu_dev *etdev, unsigned long level,
+				       unsigned long *active_level)
+{
+	struct edgetpu_command_element cmd = {
+		.code = KCI_CODE_FIRMWARE_TRACING_LEVEL,
+		.dma = {
+			.flags = (u32)level,
+		},
+	};
+	struct edgetpu_kci_response_element resp;
+	int ret;
+
+	ret = edgetpu_kci_send_cmd_return_resp(etdev->kci, &cmd, &resp);
+	if (ret == KCI_ERROR_OK)
+		*active_level = resp.retval;
+
+	return ret;
 }
 
 int edgetpu_kci_resp_rkci_ack(struct edgetpu_dev *etdev,

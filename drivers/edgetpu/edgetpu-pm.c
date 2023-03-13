@@ -53,9 +53,13 @@ static int edgetpu_pm_get_locked(struct edgetpu_pm *etpm)
 	int ret = 0;
 
 	if (!power_up_count) {
-		ret = etpm->p->handlers->power_up(etpm);
-		if (!ret)
-			edgetpu_mailbox_restore_active_mailbox_queues(etpm->etdev);
+		if (etpm->p->power_down_pending) {
+			etpm->p->power_down_pending = false;
+		} else {
+			ret = etpm->p->handlers->power_up(etpm);
+			if (!ret)
+				edgetpu_mailbox_restore_active_mailbox_queues(etpm->etdev);
+		}
 	}
 	if (ret)
 		etpm->p->power_up_count--;
@@ -103,7 +107,6 @@ int edgetpu_pm_get(struct edgetpu_pm *etpm)
 		return 0;
 
 	mutex_lock(&etpm->p->lock);
-	etpm->p->power_down_pending = false;
 	ret = edgetpu_pm_get_locked(etpm);
 	mutex_unlock(&etpm->p->lock);
 
