@@ -56,17 +56,6 @@ int edgetpu_thermal_suspend(struct device *dev);
 int edgetpu_thermal_resume(struct device *dev);
 
 /*
- * Holds thermal->lock.
- *
- * Does nothing if the thermal management is not supported.
- */
-static inline void edgetpu_thermal_lock(struct edgetpu_thermal *thermal)
-{
-	if (!IS_ERR_OR_NULL(thermal))
-		mutex_lock(&thermal->lock);
-}
-
-/*
  * Checks whether device is thermal suspended.
  * Returns false if the thermal management is not supported.
  */
@@ -75,17 +64,6 @@ static inline bool edgetpu_thermal_is_suspended(struct edgetpu_thermal *thermal)
 	if (!IS_ERR_OR_NULL(thermal))
 		return thermal->thermal_suspended;
 	return false;
-}
-
-/*
- * Releases thermal->lock.
- *
- * Does nothing if the thermal management is not supported.
- */
-static inline void edgetpu_thermal_unlock(struct edgetpu_thermal *thermal)
-{
-	if (!IS_ERR_OR_NULL(thermal))
-		mutex_unlock(&thermal->lock);
 }
 
 #endif /* __EDGETPU_THERMAL_H__ */

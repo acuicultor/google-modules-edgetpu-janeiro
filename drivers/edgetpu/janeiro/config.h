@@ -40,6 +40,9 @@
 /* Is able to support external workloads */
 #define EDGETPU_FEATURE_INTEROP
 
+/* Metrics are reported for a single default "cluster" component. */
+#define EDGETPU_TPU_CLUSTER_COUNT	1
+
 /*
  * The TPU VA where the firmware is located.
  *

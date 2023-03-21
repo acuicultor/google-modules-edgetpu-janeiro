@@ -21,6 +21,7 @@
 #include "edgetpu-mailbox.h"
 #include "edgetpu-mobile-platform.h"
 #include "edgetpu-pm.h"
+#include "edgetpu-thermal.h"
 #include "mobile-firmware.h"
 #include "mobile-pm.h"
 
@@ -39,6 +40,10 @@ static int power_state = TPU_DEFAULT_POWER_STATE;
 module_param(power_state, int, 0660);
 
 #define MAX_VOLTAGE_VAL 1250000
+
+#define BLOCK_DOWN_RETRY_TIMES 50
+#define BLOCK_DOWN_MIN_DELAY_US 1000
+#define BLOCK_DOWN_MAX_DELAY_US 1500
 
 enum edgetpu_pwr_state edgetpu_active_states[EDGETPU_NUM_STATES] = {
 	TPU_ACTIVE_UUD,
@@ -434,8 +439,23 @@ static int mobile_power_up(struct edgetpu_pm *etpm)
 	struct edgetpu_mobile_platform_pwr *platform_pwr = &etmdev->platform_pwr;
 	int ret;
 
-	if (platform_pwr->is_block_down && !platform_pwr->is_block_down(etdev))
+	if (platform_pwr->is_block_down) {
+		int times = 0;
+
+		do {
+			if (platform_pwr->is_block_down(etdev))
+				break;
+			usleep_range(BLOCK_DOWN_MIN_DELAY_US, BLOCK_DOWN_MAX_DELAY_US);
+		} while (++times < BLOCK_DOWN_RETRY_TIMES);
+		if (times >= BLOCK_DOWN_RETRY_TIMES && !platform_pwr->is_block_down(etdev))
+			etdev_warn(etdev, "Block is still on\n");
+	}
+
+	if (edgetpu_thermal_is_suspended(etdev->thermal)) {
+		etdev_warn_ratelimited(etdev,
+				       "power up rejected due to device thermal limit exceeded");
 		return -EAGAIN;
+	}
 
 	ret = mobile_pwr_state_set(etpm->etdev, mobile_get_initial_pwr_state(etdev->dev));
 

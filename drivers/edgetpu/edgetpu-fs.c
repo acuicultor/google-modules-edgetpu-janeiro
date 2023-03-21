@@ -597,17 +597,14 @@ static int edgetpu_ioctl_acquire_wakelock(struct edgetpu_client *client)
 	 */
 	client->pid = current->pid;
 	client->tgid = current->tgid;
-	edgetpu_thermal_lock(thermal);
 	if (edgetpu_thermal_is_suspended(thermal)) {
 		/* TPU is thermal suspended, so fail acquiring wakelock */
 		ret = -EAGAIN;
 		etdev_warn_ratelimited(client->etdev,
-				       "wakelock acquire rejected due to thermal suspend");
-		edgetpu_thermal_unlock(thermal);
+		       "wakelock acquire rejected due to device thermal limit exceeded");
 		goto error_client_unlock;
 	} else {
 		ret = edgetpu_pm_get(client->etdev->pm);
-		edgetpu_thermal_unlock(thermal);
 		if (ret) {
 			etdev_warn(client->etdev, "%s: pm_get failed (%d)",
 				   __func__, ret);
@@ -1030,6 +1027,19 @@ static const struct file_operations mappings_ops = {
 	.release = single_release,
 };
 
+static int syncfences_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, edgetpu_sync_fence_debugfs_show, inode->i_private);
+}
+
+static const struct file_operations syncfences_ops = {
+	.open = syncfences_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.owner = THIS_MODULE,
+	.release = single_release,
+};
+
 static int edgetpu_pm_debugfs_set_wakelock(void *data, u64 val)
 {
 	struct edgetpu_dev *etdev = data;
@@ -1054,6 +1064,7 @@ static void edgetpu_fs_setup_debugfs(struct edgetpu_dev *etdev)
 	}
 	debugfs_create_file("mappings", 0440, etdev->d_entry,
 			    etdev, &mappings_ops);
+	debugfs_create_file("syncfences", 0440, etdev->d_entry, etdev, &syncfences_ops);
 	debugfs_create_file("wakelock", 0220, etdev->d_entry, etdev,
 			    &fops_wakelock);
 #ifndef EDGETPU_FEATURE_MOBILE
@@ -1295,20 +1306,6 @@ void edgetpu_fs_remove(struct edgetpu_dev *etdev)
 	debugfs_remove_recursive(etdev->d_entry);
 }
 
-static int syncfences_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, edgetpu_sync_fence_debugfs_show,
-			   inode->i_private);
-}
-
-static const struct file_operations syncfences_ops = {
-	.open = syncfences_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.owner = THIS_MODULE,
-	.release = single_release,
-};
-
 static void edgetpu_debugfs_global_setup(void)
 {
 	edgetpu_debugfs_dir = debugfs_create_dir("edgetpu", NULL);
@@ -1316,9 +1313,6 @@ static void edgetpu_debugfs_global_setup(void)
 		pr_warn(DRIVER_NAME " error creating edgetpu debugfs dir\n");
 		return;
 	}
-
-	debugfs_create_file("syncfences", 0440, edgetpu_debugfs_dir, NULL,
-			    &syncfences_ops);
 }
 
 int __init edgetpu_fs_init(void)
