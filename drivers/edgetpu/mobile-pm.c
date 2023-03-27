@@ -448,7 +448,7 @@ static int mobile_power_up(struct edgetpu_pm *etpm)
 			usleep_range(BLOCK_DOWN_MIN_DELAY_US, BLOCK_DOWN_MAX_DELAY_US);
 		} while (++times < BLOCK_DOWN_RETRY_TIMES);
 		if (times >= BLOCK_DOWN_RETRY_TIMES && !platform_pwr->is_block_down(etdev))
-			etdev_warn(etdev, "Block is still on\n");
+			return -EAGAIN;
 	}
 
 	if (edgetpu_thermal_is_suspended(etdev->thermal)) {

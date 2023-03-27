@@ -888,7 +888,7 @@ static void edgetpu_dma_fence_release(struct dma_fence *fence)
 	list_del(&etfence->etfence_list);
 	spin_unlock_irqrestore(&etfence_list_lock, flags);
 
-	/* TODO(b/258868303): Don't remove this check when group required, might not yet be set. */
+	/* group might not yet be set if error at init time. */
 	group = etfence->group;
 	if (group) {
 		mutex_lock(&group->lock);
@@ -963,15 +963,10 @@ int edgetpu_sync_fence_create(struct edgetpu_device_group *group,
 	spin_lock_irqsave(&etfence_list_lock, flags);
 	list_add_tail(&etfence->etfence_list, &etfence_list_head);
 	spin_unlock_irqrestore(&etfence_list_lock, flags);
-
-	/* TODO(b/258868303): Make group required, disallow creating fence we can't track. */
-	if (group) {
-		etfence->group = edgetpu_device_group_get(group);
-		mutex_lock(&group->lock);
-		list_add_tail(&etfence->group_list, &group->dma_fence_list);
-		mutex_unlock(&group->lock);
-	}
-
+	etfence->group = edgetpu_device_group_get(group);
+	mutex_lock(&group->lock);
+	list_add_tail(&etfence->group_list, &group->dma_fence_list);
+	mutex_unlock(&group->lock);
 	fd_install(fd, sync_file->file);
 	datap->fence = fd;
 	return 0;
@@ -1098,10 +1093,7 @@ int edgetpu_sync_fence_debugfs_show(struct seq_file *s, void *unused)
 
 		if (fence->error)
 			seq_printf(s, " err=%d", fence->error);
-		/* TODO(b/258868303): Remove check when group is required. */
-		if (etfence->group)
-			seq_printf(s, " group=%u", etfence->group->workload_id);
-		seq_putc(s, '\n');
+		seq_printf(s, " group=%u\n", etfence->group->workload_id);
 		spin_unlock_irq(&etfence->lock);
 	}
 

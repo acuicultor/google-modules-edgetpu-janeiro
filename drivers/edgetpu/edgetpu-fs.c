@@ -441,10 +441,11 @@ static int edgetpu_ioctl_sync_fence_create(
 	if (copy_from_user(&data, (void __user *)datap, sizeof(data)))
 		return -EFAULT;
 	LOCK(client);
-	if (!client->group)
-		/* TODO(b/258868303): Require a group, disallow creating a fence we can't track. */
-		etdev_warn(client->etdev,
-			   "client creating sync fence not joined to a device group");
+	if (!client->group) {
+		etdev_err(client->etdev, "client creating sync fence not joined to a device group");
+		UNLOCK(client);
+		return -EINVAL;
+	}
 	ret = edgetpu_sync_fence_create(client->group, &data);
 	UNLOCK(client);
 	if (ret)
@@ -1264,6 +1265,10 @@ static int edgeptu_fs_add_interface(struct edgetpu_dev *etdev, struct edgetpu_de
 		return ret;
 	}
 
+	if (etiparams->name)
+		etiface->d_entry =
+			debugfs_create_symlink(etiparams->name, edgetpu_debugfs_dir,
+					       etdev->dev_name);
 	return 0;
 }
 
@@ -1299,6 +1304,7 @@ void edgetpu_fs_remove(struct edgetpu_dev *etdev)
 	for (i = 0; i < etdev->num_ifaces; i++) {
 		struct edgetpu_dev_iface *etiface = &etdev->etiface[i];
 
+		debugfs_remove(etiface->d_entry);
 		device_destroy(edgetpu_class, etiface->devno);
 		etiface->etcdev = NULL;
 		cdev_del(&etiface->cdev);

@@ -949,8 +949,9 @@ struct iova_mapping_worker_param {
 	uint idx;
 };
 
-static int edgetpu_map_iova_sgt_worker(struct iova_mapping_worker_param *param)
+static int edgetpu_map_iova_sgt_worker(void *p)
 {
+	struct iova_mapping_worker_param *param = p;
 	struct edgetpu_device_group *group = param->group;
 	uint i = param->idx;
 	struct edgetpu_host_map *hmap = param->hmap;
@@ -1006,9 +1007,8 @@ static int edgetpu_device_group_map_iova_sgt(struct edgetpu_device_group *group,
 		params[i].hmap = hmap;
 		params[i].group = group;
 		params[i].idx = i + 1;
-		ret = edgetpu_async_add_job(
-			ctx, &params[i],
-			(edgetpu_async_job_t)edgetpu_map_iova_sgt_worker);
+		ret = edgetpu_async_add_job(ctx, &params[i],
+			edgetpu_map_iova_sgt_worker);
 		if (ret)
 			goto out_free;
 	}
