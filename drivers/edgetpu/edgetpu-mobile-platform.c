@@ -327,6 +327,17 @@ edgetpu_mobile_platform_set_fw_ctx_memory(struct edgetpu_mobile_platform_dev *et
 	return 0;
 }
 
+static inline const char *get_driver_commit(void)
+{
+#if IS_ENABLED(CONFIG_MODULE_SCMVERSION)
+	return THIS_MODULE->scmversion;
+#elif defined(GIT_REPO_TAG)
+	return GIT_REPO_TAG;
+#else
+	return "Unknown";
+#endif
+}
+
 static int edgetpu_mobile_platform_probe(struct platform_device *pdev,
 					 struct edgetpu_mobile_platform_dev *etmdev)
 {
@@ -452,7 +463,8 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev,
 		}
 	}
 
-	dev_info(dev, "%s edgetpu initialized. Build: %s", etdev->dev_name, GIT_REPO_TAG);
+	dev_info(dev, "%s edgetpu initialized. Build: %s", etdev->dev_name, get_driver_commit());
+
 	/* Turn the device off unless a client request is already received. */
 	edgetpu_pm_shutdown(etdev, false);
 

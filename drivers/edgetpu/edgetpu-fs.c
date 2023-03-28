@@ -1360,4 +1360,6 @@ struct dentry *edgetpu_fs_debugfs_dir(void)
 MODULE_DESCRIPTION("Google EdgeTPU file operations");
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL v2");
+#ifdef GIT_REPO_TAG
 MODULE_INFO(gitinfo, GIT_REPO_TAG);
+#endif

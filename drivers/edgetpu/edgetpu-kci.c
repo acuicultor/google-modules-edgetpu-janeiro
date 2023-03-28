@@ -201,10 +201,7 @@ static void edgetpu_reverse_kci_init(struct edgetpu_reverse_kci *rkci)
  * 2. #seq == @resp->seq:
  *   - Copy @resp, pop the head and we're done.
  * 3. #seq < @resp->seq:
- *   - Should not happen, this implies the sequence number of either entries in
- *     wait_list or responses are out-of-order, or remote didn't respond to a
- *     command. In this case, the status of response will be set to
- *     KCI_STATUS_NO_RESPONSE.
+ *   - Probable race with another context also processing KCI responses, ignore.
  *   - Pop until case 1. or 2.
  */
 static void edgetpu_kci_consume_wait_list(
@@ -225,10 +222,7 @@ static void edgetpu_kci_consume_wait_list(
 			kfree(cur);
 			break;
 		}
-		/* #seq < @resp->seq */
-		cur->resp->status = KCI_STATUS_NO_RESPONSE;
-		list_del(&cur->list);
-		kfree(cur);
+		/* #seq < @resp->seq, probable race with another consumer, let it handle. */
 	}
 
 	spin_unlock_irqrestore(&kci->wait_list_lock, flags);
