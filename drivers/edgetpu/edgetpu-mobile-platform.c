@@ -330,7 +330,7 @@ edgetpu_mobile_platform_set_fw_ctx_memory(struct edgetpu_mobile_platform_dev *et
 static inline const char *get_driver_commit(void)
 {
 #if IS_ENABLED(CONFIG_MODULE_SCMVERSION)
-	return THIS_MODULE->scmversion;
+	return THIS_MODULE->scmversion ?: "scmversion missing";
 #elif defined(GIT_REPO_TAG)
 	return GIT_REPO_TAG;
 #else
