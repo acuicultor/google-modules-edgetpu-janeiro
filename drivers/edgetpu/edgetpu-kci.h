@@ -219,8 +219,8 @@ struct edgetpu_kci_device_group_detail {
 };
 
 struct edgetpu_kci_open_device_detail {
-	/* The bit map of mailboxes to be opened. */
-	u16 mailbox_map;
+	/* The client privilege level. */
+	u16 client_priv;
 	/*
 	 * Virtual context ID @mailbox_id is associated to.
 	 * For device groups with @mailbox_detachable attribute the mailbox attached to the group
@@ -381,7 +381,8 @@ int edgetpu_kci_get_debug_dump(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
  * You usually shouldn't call this directly - consider using
  * edgetpu_mailbox_activate() or edgetpu_mailbox_activate_bulk() instead.
  */
-int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_map, s16 vcid, bool first_open);
+int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_map, u32 client_priv, s16 vcid,
+			    bool first_open);
 
 /*
  * Inform the firmware that the VII mailboxes included in @mailbox_map are closed.

@@ -1029,10 +1029,11 @@ int edgetpu_kci_get_debug_dump(struct edgetpu_kci *kci, tpu_addr_t tpu_addr,
 	return edgetpu_kci_send_cmd(kci, &cmd);
 }
 
-int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_map, s16 vcid, bool first_open)
+int edgetpu_kci_open_device(struct edgetpu_kci *kci, u32 mailbox_map, u32 client_priv, s16 vcid,
+			    bool first_open)
 {
 	const struct edgetpu_kci_open_device_detail detail = {
-		.mailbox_map = mailbox_map,
+		.client_priv = client_priv,
 		.vcid = vcid,
 		.flags = (mailbox_map << 1) | first_open,
 	};

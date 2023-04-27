@@ -159,7 +159,7 @@ int edgetpu_chip_acquire_ext_mailbox(struct edgetpu_client *client,
 		mutex_unlock(&etmdev->tz_mailbox_lock);
 		return -EBUSY;
 	}
-	ret = edgetpu_mailbox_enable_ext(client, EDGETPU_TZ_MAILBOX_ID, NULL);
+	ret = edgetpu_mailbox_enable_ext(client, EDGETPU_TZ_MAILBOX_ID, NULL, 0);
 	if (!ret)
 		etmdev->secure_client = client;
 	mutex_unlock(&etmdev->tz_mailbox_lock);
