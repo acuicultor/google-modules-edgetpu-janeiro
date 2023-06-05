@@ -380,11 +380,10 @@ int edgetpu_get_state_errno_locked(struct edgetpu_dev *etdev)
 {
 	switch (etdev->state) {
 	case ETDEV_STATE_BAD:
-		return -ENODEV;
+	case ETDEV_STATE_NOFW:
+		return -EIO;
 	case ETDEV_STATE_FWLOADING:
 		return -EAGAIN;
-	case ETDEV_STATE_NOFW:
-		return -EINVAL;
 	default:
 		break;
 	}

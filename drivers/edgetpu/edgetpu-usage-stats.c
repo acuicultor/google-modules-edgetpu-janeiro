@@ -959,11 +959,8 @@ void edgetpu_usage_stats_init(struct edgetpu_dev *etdev)
 
 	ustats = devm_kzalloc(etdev->dev, sizeof(*etdev->usage_stats),
 			      GFP_KERNEL);
-	if (!ustats) {
-		etdev_warn(etdev,
-			   "failed to allocate memory for usage stats\n");
+	if (!ustats)
 		return;
-	}
 
 	hash_init(ustats->uid_hash_table);
 	mutex_init(&ustats->usage_stats_lock);
